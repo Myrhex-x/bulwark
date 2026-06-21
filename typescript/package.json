@@ -33,7 +33,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Myrhex-x/bulwark.git",
+    "url": "git+https://github.com/Myrhex-x/bulwark.git",
     "directory": "typescript"
   },
   "homepage": "https://github.com/Myrhex-x/bulwark#readme",
