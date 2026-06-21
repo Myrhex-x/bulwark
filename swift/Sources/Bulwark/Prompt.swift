@@ -1,5 +1,5 @@
-// Stage 4 — the hardened prompt: strict system message + per-request canary +
-// sandwich reminder. In sync with the Python/TypeScript implementations.
+// Build the hardened chat messages: strict system message, a per-request canary
+// leak tripwire, and a sandwich reminder repeated after the content.
 
 import Foundation
 

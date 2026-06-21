@@ -317,9 +317,8 @@ _ADVANCED = [
 # --- Multilingual ----------------------------------------------------------
 # Attackers don't have to write in English. These cover the highest-signal
 # "ignore previous instructions" / "reveal the system prompt" payloads in major
-# languages. Latin-script patterns use \b/\w (ASCII verb stems); Cyrillic and
-# CJK patterns use explicit ranges / literals and NO \b or \w, so they behave
-# identically across the Python, ICU (Swift), and JavaScript regex engines.
+# languages. Cyrillic and CJK patterns use explicit ranges/literals instead of
+# \b/\w (which aren't Unicode-aware in every regex engine).
 _MULTILINGUAL = [
     _sig(
         "ml.ignore_fr", "instruction_override", Severity.HIGH, 0.80,

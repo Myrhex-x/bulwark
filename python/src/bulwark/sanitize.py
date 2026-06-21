@@ -1,25 +1,9 @@
-"""Stage 1 — sanitization.
+"""Strip invisible and structural injection vectors from untrusted text.
 
-Removes the invisible and structural tricks attackers use to smuggle
-instructions past both humans and naive pattern matchers:
-
-* Unicode *Tag* characters (U+E0000–U+E007F) — "ASCII smuggling": a full
-  hidden instruction can be encoded in characters that render as nothing.
-* Bidirectional controls (U+202A–U+202E, U+2066–U+2069, …) — "Trojan Source":
-  text that reads one way but is ordered another.
-* Zero-width and other invisible separators used to break up trigger words
-  (``i<ZWSP>gnore``) so they dodge keyword filters.
-* Variation-selector smuggling (U+FE00–U+FE0F, U+E0100–U+E01EF).
-* C0/C1 control characters.
-* HTML comments, ``<script>``/``<style>``/``<noscript>``/``<template>`` blocks
-  and CSS-hidden elements (``display:none``, ``visibility:hidden``, ``opacity:0``,
-  ``aria-hidden``, the ``hidden`` attribute) whose only purpose on a page is to
-  feed a model text a human never sees. Parsed with the stdlib HTML parser so
-  nested hidden subtrees are handled correctly.
-
-Confusable evasion is folded two ways: NFKC normalization handles full-width and
-ligature look-alikes, and :func:`fold_confusables` maps cross-script homoglyphs
-(Cyrillic/Greek letters that look like Latin) to ASCII for the *detection* copy.
+Removes ASCII smuggling (Unicode tag chars), bidi controls, zero-width and
+control characters, and CSS-hidden HTML, then NFKC-normalizes. Cross-script
+homoglyph folding (``fold_confusables``) runs on the detection copy only, never
+on text shown to the model.
 """
 
 from __future__ import annotations

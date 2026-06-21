@@ -1,5 +1,4 @@
-// Stage 2 — detection and risk scoring (noisy-OR over weighted signals).
-// In sync with the Python/TypeScript implementations.
+// Detection and risk scoring: noisy-OR over weighted signature/heuristic signals.
 
 import Foundation
 

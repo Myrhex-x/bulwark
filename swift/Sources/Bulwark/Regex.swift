@@ -1,5 +1,4 @@
-// Thin wrapper over NSRegularExpression (ICU) so the same patterns used by the
-// Python/TypeScript ports work unchanged here.
+// Thin wrapper over NSRegularExpression.
 
 import Foundation
 

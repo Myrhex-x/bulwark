@@ -1,8 +1,7 @@
-// Stage 1 — sanitization.
-// Strips ASCII smuggling (Unicode Tag chars), bidi (Trojan Source), zero-width,
-// variation selectors, control chars, and HTML comments/scripts/hidden elements
-// (stack-based, handles nesting). NFKC + cross-script homoglyph folding defeat
-// confusable evasion. In sync with the Python/TypeScript implementations.
+// Strip invisible and structural injection vectors from untrusted text: ASCII
+// smuggling (Unicode tag chars), bidi, zero-width, variation selectors, control
+// chars, and CSS-hidden HTML (stack-based, handles nesting), then NFKC.
+// foldConfusables handles cross-script homoglyphs on the detection copy only.
 
 import Foundation
 

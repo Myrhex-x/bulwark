@@ -1,28 +1,27 @@
-// The high-level orchestrator: sanitize → detect → spotlight → harden →
-// [your model] → validate. Bring any model: an async closure
-// ([ChatMessage]) async throws -> String. In sync with the other ports.
+// The high-level orchestrator: sanitize -> detect -> spotlight -> harden ->
+// [your model] -> validate. Bring any model: an async ([ChatMessage]) throws -> String.
 
 import Foundation
 
 public struct BulwarkConfig: Sendable {
-    // Stage 1 — sanitize
+    // sanitize
     public var stripHtml: Bool?          // nil = auto-detect HTML
     public var normalizeUnicode: Bool
     public var keepEmojiVariation: Bool
     public var foldConfusables: Bool
     public var maxContentChars: Int
-    // Stage 2 — detect
+    // detect
     public var detectionThreshold: Double
     public var useHeuristics: Bool
     public var blockBeforeLlm: Severity?  // nil = never hard-block pre-LLM
-    // Stage 3 — spotlight
+    // spotlight
     public var spotlightMethods: [String]
     public var marker: String
-    // Stage 4 — prompt
+    // prompt
     public var maxWords: Int?
     public var language: String?
     public var extraInstruction: String?
-    // Stage 5 — validate
+    // validate
     public var redactOutputLinks: Bool
     public var redactOutputImages: Bool
     public var blockOnOutputLeak: Bool

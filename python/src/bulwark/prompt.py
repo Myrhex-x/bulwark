@@ -1,15 +1,8 @@
-"""Stage 4 — the hardened prompt.
+"""Build the hardened chat messages.
 
-Builds the chat messages sent to the model. The defence here is layered:
-
-* a strict **system** message that frames the content as inert, hostile data
-  and forbids following anything inside it;
-* a **canary** token the model is told never to emit — if it later appears in
-  the output, the system prompt leaked and we know the attack worked;
-* a **sandwich**: the core instruction is repeated *after* the content, where
-  late-positioned injections usually try to win;
-* a description of the exact spotlighting in use so the model knows which
-  boundary is real and how to read marked/encoded data.
+A strict system message frames the content as inert hostile data, a per-request
+canary token acts as a leak tripwire, and the core instruction is repeated after
+the content (sandwich) where late injections tend to land.
 """
 
 from __future__ import annotations

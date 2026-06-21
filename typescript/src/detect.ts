@@ -1,9 +1,8 @@
 /**
- * Stage 2 — detection and risk scoring.
- *
- * Runs the signature database plus structural heuristics over sanitized text,
- * then combines weighted signals into a single risk score with a noisy-OR:
- *   score = 1 - ∏ (1 - wᵢ)
+ * Detection and risk scoring. Runs the signature database plus structural
+ * heuristics over sanitized text and combines the weighted signals with a
+ * noisy-OR (score = 1 - prod(1 - wi)), so weak signals accumulate without any
+ * single one saturating the score.
  */
 
 import { SIGNATURES } from "./patterns.js";

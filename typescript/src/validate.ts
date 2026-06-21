@@ -1,9 +1,8 @@
 /**
- * Stage 5 — output validation. Catches a *successful* attack in the model's
- * reply: canary leaks, boundary-nonce leaks, exfiltration channels (markdown
- * images/links, HTML <img>, autolinks, data-bearing URLs), and compliance
- * tells. The reply is normalized first (invisibles stripped, NFKC) so split-
- * canary / split-URL evasion can't slip through. In sync with Python validate.py.
+ * Inspect the model's reply for a successful attack: canary/prompt leaks,
+ * boundary-nonce leaks, exfiltration channels (markdown/HTML images, links,
+ * data-bearing URLs) and compliance tells. The reply is normalized first
+ * (invisibles stripped, NFKC) so split-canary / split-URL evasion can't slip by.
  */
 
 import { stripInvisible } from "./sanitize.js";

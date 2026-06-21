@@ -1,5 +1,4 @@
 // Core data types shared across Bulwark's pipeline stages.
-// Kept behaviourally in sync with the Python and TypeScript implementations.
 
 import Foundation
 

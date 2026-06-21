@@ -1,5 +1,5 @@
-// Stage 3 — spotlighting (Hines et al., Microsoft, 2024).
-// Random-nonce delimiting, data-marking, and base64 isolation.
+// Spotlighting: random-nonce delimiting, data-marking, and base64 isolation.
+// Based on spotlighting (Hines et al., Microsoft, 2024).
 
 import Foundation
 

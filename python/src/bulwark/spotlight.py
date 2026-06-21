@@ -1,17 +1,9 @@
-"""Stage 3 — spotlighting.
+"""Spotlighting: make untrusted content unmistakably data.
 
-"Spotlighting" (Hines et al., Microsoft, 2024) makes untrusted content
-*unmistakably* data so a model will not confuse it for instructions. Bulwark
-ships three composable transforms:
-
-* **delimit** — wrap the content in a boundary tagged with a random nonce. A
-  fake ``</untrusted>`` planted in the data cannot close the real boundary
-  because it does not know the nonce.
-* **datamark** — replace spaces with a marker character. Continuous marking
-  signals "every token here is data", and it visibly breaks up any injected
-  instruction.
-* **base64** — encode the content. The model treats it as an opaque blob and
-  decodes it only to read, never to obey. Strongest, but costs tokens/quality.
+Three composable transforms: ``delimit`` wraps content in a random-nonce
+boundary a fake closing tag can't forge; ``datamark`` replaces spaces with a
+marker; ``base64`` encodes the content as an opaque blob. Based on spotlighting
+(Hines et al., Microsoft, 2024).
 """
 
 from __future__ import annotations

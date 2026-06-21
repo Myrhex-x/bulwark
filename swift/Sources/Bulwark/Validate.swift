@@ -1,6 +1,5 @@
-// Stage 5 — output validation. Normalizes the reply (defeats split-token
-// evasion), then catches canary/nonce leaks and exfiltration channels.
-// In sync with the Python/TypeScript implementations.
+// Inspect the model's reply: normalize it (defeats split-token evasion), then
+// catch canary/prompt leaks, nonce leaks, and exfiltration channels.
 
 import Foundation
 

@@ -1,14 +1,9 @@
-"""Stage 2 — detection and risk scoring.
+"""Detection and risk scoring.
 
-Runs the signature database plus a few structural heuristics over already
-sanitized text, then combines every weighted signal into a single risk score
-using a *noisy-OR*::
-
-    score = 1 - ∏ (1 - wᵢ)
-
-so that many weak signals accumulate toward 1.0 but no single one can exceed
-it. Sanitize-stage findings (hidden unicode, etc.) can be folded into the same
-score, which is what :class:`~bulwark.guard.Bulwark` does.
+Runs the signature database plus a few structural heuristics over sanitized
+text and combines the weighted signals with a noisy-OR (score = 1 - prod(1-wi)),
+so weak signals accumulate but no single one saturates the score. Sanitize-stage
+findings are folded into the same score.
 """
 
 from __future__ import annotations

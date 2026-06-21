@@ -1,4 +1,4 @@
-"""Tests for stage 1 — sanitization.
+"""Tests for sanitization.
 
 Invisible characters are constructed via ``chr()`` so the test source stays
 unambiguous (no hidden bytes in the file).

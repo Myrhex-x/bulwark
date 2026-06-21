@@ -1,4 +1,4 @@
-"""Tests for stage 5 — output validation."""
+"""Tests for output validation."""
 
 from bulwark import validate_output
 from bulwark.prompt import PromptContext

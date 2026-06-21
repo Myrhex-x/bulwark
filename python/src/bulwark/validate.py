@@ -1,19 +1,9 @@
-"""Stage 5 — output validation.
+"""Inspect the model's reply for signs of a successful attack.
 
-Even with every upstream defence, a model can still be tricked. This stage
-inspects the reply for the tell-tale signatures of a *successful* attack and
-either redacts or blocks:
-
-* The reply is first **normalized** (invisible characters stripped, NFKC) so an
-  attacker cannot split the canary or an exfiltration URL with zero-width
-  characters to slip past these checks.
-* **canary leak** — the secret token from the system prompt appears, proving
-  the prompt was exfiltrated. Critical, always unsafe.
-* **boundary nonce leak** — the model echoed our internal boundary.
-* **exfiltration channels** — markdown images/links, HTML ``<img>`` tags,
-  autolinks, and raw URLs carrying a data-bearing query string (the usual ways
-  stolen data leaves a chat).
-* **compliance tells** — openings like "Sure, here is…", "As DAN…", "HACKED".
+The reply is normalized first (invisibles stripped, NFKC) so a split canary or
+URL can't slip past the checks. Then we look for canary/prompt leaks, boundary
+nonce leaks, exfiltration channels (markdown/HTML images, links, data-bearing
+URLs) and compliance tells, redacting or blocking as needed.
 """
 
 from __future__ import annotations

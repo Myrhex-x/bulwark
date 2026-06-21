@@ -1,9 +1,6 @@
 /**
- * Signature database of known prompt-injection patterns.
- *
- * Each signature carries a weight in [0, 1). Weights are combined with a
- * "noisy-OR" so several weak signals accumulate but never exceed 1.0.
- * Kept 1:1 in sync with the Python `patterns.py`.
+ * Signature database of known prompt-injection patterns. Each signature carries
+ * a weight in [0, 1); the detector combines them with a noisy-OR.
  */
 
 import type { Severity } from "./types.js";
@@ -300,9 +297,8 @@ const ADVANCED: Signature[] = [
   ),
 ];
 
-// Multilingual. Latin-script patterns use \b/\w (ASCII verb stems); Cyrillic and
-// CJK patterns use explicit ranges / literals and NO \b or \w so they behave
-// identically across the Python, ICU (Swift), and JavaScript regex engines.
+// Multilingual payloads. Cyrillic and CJK patterns use explicit ranges/literals
+// instead of \b/\w, which are ASCII-only in JavaScript's regex engine.
 const MULTILINGUAL: Signature[] = [
   sig("ml.ignore_fr", "instruction_override", "high", 0.80,
     "\\bignor\\w*\\b.{0,40}?\\b(?:instructions?|consignes?|directives?)\\b.{0,25}?\\b(?:pr[ée]c[ée]dentes?|ant[ée]rieures?|ci-dessus)\\b",

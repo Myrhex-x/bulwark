@@ -40,7 +40,7 @@ LLM = Callable[[List[Dict[str, str]]], str]
 class BulwarkConfig:
     """Tunables for the whole pipeline. Use the presets for common postures."""
 
-    # Stage 1 — sanitize
+    # sanitize
     strip_html: "bool | str" = "auto"
     normalize_unicode: bool = True
     keep_emoji_variation: bool = False
@@ -48,23 +48,23 @@ class BulwarkConfig:
     # Hard cap on input size (defence against pathological inputs / cost blowups).
     max_content_chars: int = 200_000
 
-    # Stage 2 — detect
+    # detect
     detection_threshold: float = 0.5
     use_heuristics: bool = True
     # Refuse to call the model when risk reaches this severity (None = never
     # hard-block; rely on structural defences + output validation instead).
     block_before_llm: Optional[Severity] = None
 
-    # Stage 3 — spotlight
+    # spotlight
     spotlight_methods: Sequence[str] = ("delimit",)
     marker: str = _spotlight.DEFAULT_MARKER
 
-    # Stage 4 — prompt
+    # prompt
     max_words: Optional[int] = 200
     language: Optional[str] = None
     extra_instruction: Optional[str] = None
 
-    # Stage 5 — validate
+    # validate
     redact_output_links: bool = True
     redact_output_images: bool = True
     block_on_output_leak: bool = True

@@ -1,8 +1,7 @@
 /**
- * Stage 3 — spotlighting (Hines et al., Microsoft, 2024).
- *
- * Makes untrusted content unmistakably *data*: delimit it with a random nonce
- * boundary, optionally data-mark it (spaces → marker), or base64-encode it.
+ * Spotlighting: make untrusted content unmistakably data. Delimit it with a
+ * random-nonce boundary, optionally data-mark it (spaces -> marker), or
+ * base64-encode it. Based on spotlighting (Hines et al., Microsoft, 2024).
  */
 
 import type { SpotlightResult } from "./types.js";

@@ -1,14 +1,8 @@
 /**
- * Stage 1 — sanitization.
- *
- * Removes invisible/structural tricks attackers use to smuggle instructions:
- * Unicode Tag characters (ASCII smuggling), bidi controls (Trojan Source),
- * zero-width separators, variation-selector smuggling, control characters,
- * and HTML comments / scripts / CSS-hidden elements (via a small stack-based
- * extractor that handles nesting). Confusable evasion is folded two ways: NFKC
- * for full-width/ligatures, and `foldConfusables` for cross-script homoglyphs.
- *
- * Kept behaviourally in sync with the Python `sanitize.py`.
+ * Strip invisible and structural injection vectors from untrusted text: ASCII
+ * smuggling (Unicode tag chars), bidi controls, zero-width and control chars,
+ * and CSS-hidden HTML (stack-based extractor that handles nesting), then NFKC.
+ * `foldConfusables` handles cross-script homoglyphs on the detection copy only.
  */
 
 import type { Finding, SanitizeResult } from "./types.js";

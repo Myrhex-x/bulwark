@@ -1,9 +1,7 @@
 /**
- * Stage 4 — the hardened prompt.
- *
- * Strict system message + a secret canary the model must never emit + a
- * sandwich reminder after the content + a description of the spotlighting in
- * use. Kept in sync with the Python `prompt.py`.
+ * Build the hardened chat messages: a strict system message, a secret canary
+ * the model must never emit (leak tripwire), and a sandwich reminder repeated
+ * after the content.
  */
 
 import { makeNonce } from "./spotlight.js";

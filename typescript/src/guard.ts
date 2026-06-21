@@ -24,26 +24,26 @@ import {
 } from "./types.js";
 
 export interface BulwarkConfig {
-  // Stage 1 — sanitize
+  // sanitize
   stripHtml: boolean | "auto";
   normalizeUnicode: boolean;
   keepEmojiVariation: boolean;
   foldConfusables: boolean;
   /** Hard cap on input size (defence against pathological inputs / cost blowups). */
   maxContentChars: number;
-  // Stage 2 — detect
+  // detect
   detectionThreshold: number;
   useHeuristics: boolean;
   /** Refuse to call the model when risk reaches this severity (null = never). */
   blockBeforeLlm: Severity | null;
-  // Stage 3 — spotlight
+  // spotlight
   spotlightMethods: string[];
   marker: string;
-  // Stage 4 — prompt
+  // prompt
   maxWords: number | null;
   language: string | null;
   extraInstruction: string | null;
-  // Stage 5 — validate
+  // validate
   redactOutputLinks: boolean;
   redactOutputImages: boolean;
   blockOnOutputLeak: boolean;

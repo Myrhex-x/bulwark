@@ -1,4 +1,4 @@
-"""Tests for stage 2 — detection and scoring."""
+"""Tests for detection and scoring."""
 
 from bulwark import scan
 from bulwark.detect import bucket, score_findings
