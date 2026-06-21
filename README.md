@@ -48,13 +48,14 @@ Python · TypeScript · zero required dependencies · works with OpenAI, Anthrop
   │   • Unicode Tag chars (U+E0000–E007F) → "ASCII smuggling"    │
   │   • Bidi controls (Trojan Source), zero-width splitters      │
   │   • Variation-selector smuggling, control chars              │
-  │   • HTML comments / <script> / display:none hidden text      │
-  │   • NFKC-fold confusables (ｉｇｎｏｒｅ → ignore)                 │
+  │   • HTML comments / <script> / nested display:none subtrees  │
+  │   • NFKC-fold confusables (ｉｇｎｏｒｅ → ignore) + cross-script  │
+  │     homoglyph folding (Cyrillic/Greek: іgnоrе → ignore)       │
   └──────────────────────────────────────────────────────────────┘
         │
         ▼
   ┌─ 2. DETECT ─────────────────────────────────────────────────┐
-  │  Score the text against 35+ injection signatures + heuristics │
+  │  Score the text against 49 injection signatures + heuristics  │
   │  using a noisy-OR. Block, flag, or just report — your call.   │
   └──────────────────────────────────────────────────────────────┘
         │
@@ -77,8 +78,8 @@ Python · TypeScript · zero required dependencies · works with OpenAI, Anthrop
         │
         ▼
   ┌─ 5. VALIDATE ───────────────────────────────────────────────┐
-  │  Inspect the reply: canary leak? boundary leak? markdown      │
-  │  image/link exfiltration? "Sure, as DAN…" compliance tells?   │
+  │  Normalize the reply, then inspect: canary leak? boundary     │
+  │  leak? image/link/data-URL exfiltration? compliance tells?    │
   │  Redact or block before the summary ever reaches your user.   │
   └──────────────────────────────────────────────────────────────┘
         │
@@ -110,9 +111,11 @@ def my_model(messages):
 
 result = guard.summarize(untrusted_web_page, llm=my_model)
 
-print(result.summary)   # cleaned, validated summary (or None if blocked)
-print(result.safe)      # bool
-print(result.report)    # human-readable explanation of what was caught
+print(result.summary)             # cleaned, validated summary (or None if blocked)
+print(result.safe)                # is the returned summary safe to use?
+print(result.injection_detected)  # was an attack present in the input?
+print(result.status)              # SAFE | CONTAINED | UNSAFE | BLOCKED
+print(result.report)              # human-readable explanation of what was caught
 ```
 
 Using a provider adapter:
@@ -218,11 +221,11 @@ result = guard.finalize(raw, prepared)     # output validation
 
 ## What it catches (and what it can't)
 
-**Catches well:** hidden-text smuggling (Unicode tags, zero-width, bidi, hidden
-HTML), the overwhelming majority of plain-language injection payloads, fake
-boundary/role markers, prompt-leak and data-exfiltration attempts, and — via
-output validation — a model that *did* get tricked into leaking the prompt or
-emitting an exfiltration image/link.
+**Catches well:** hidden-text smuggling (Unicode tags, zero-width, bidi, nested
+hidden HTML), cross-script homoglyph disguises, the overwhelming majority of
+plain-language injection payloads, fake boundary/role markers, prompt-leak and
+data-exfiltration attempts, and — via output validation — a model that *did* get
+tricked into leaking the prompt or emitting an exfiltration image/link/data-URL.
 
 **Can't promise:** immunity to a novel, model-specific jailbreak phrased in
 ordinary prose that a given model happens to obey. That is an open research
@@ -242,7 +245,9 @@ bulwark/
 ```
 
 Both implementations share the **same signature database, scoring, prompts, and
-behaviour**, and each has a full test suite (37 tests apiece) run in CI.
+behaviour**, produce identical verdicts, and each has a full test suite (53
+Python / 52 TypeScript, including a red-team corpus) run in CI. The hardening
+work is documented in [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
 
 ## Contributing
 

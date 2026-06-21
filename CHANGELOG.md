@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] — 2026-06-21
+
+Security-review hardening. See [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
+Python and TypeScript remain at parity (53 / 52 tests).
+
+### Added
+- **Cross-script homoglyph folding** (`fold_confusables`): Cyrillic/Greek
+  look-alikes are mapped to ASCII for the detection copy, so disguises like
+  `іgnоrе аll рrеvіоus іnstruсtіоns` are caught. Model-facing text is untouched.
+- **Stack-based HTML extraction** that correctly drops nested hidden subtrees,
+  `<script>`/`<style>`/`<noscript>`/`<template>`, comments, `hidden`, and
+  `aria-hidden` (stdlib `html.parser` in Python; a tokenizer in TS).
+- **Output normalization before validation** — invisibles stripped + NFKC — so a
+  zero-width-split canary or exfiltration URL can't evade the checks.
+- Expanded output exfiltration detection: HTML `<img>`, autolinks, and raw URLs
+  with a data-bearing query string.
+- 13 new injection signatures (now **49** across 8 categories): authority/
+  precedence overrides, disable-safety, identity reassignment, forged
+  `Human:`/`User:` turns, "repeat everything above", email exfiltration, and more.
+- `max_content_chars` input cap (default 200k).
+- A red-team corpus test asserting 100% recall / 0% false positives.
+
+### Changed
+- **Trust semantics:** `safe` now reflects *output* safety only. New
+  `injection_detected` flag and `status` (`SAFE`/`CONTAINED`/`UNSAFE`/`BLOCKED`)
+  distinguish "a contained attack" from "an unsafe result". A detected-but-
+  contained injection is now `safe=True`, `status="CONTAINED"`.
+
 ## [0.1.0] — 2026-06-21
 
 Initial release. Python and TypeScript implementations at parity.

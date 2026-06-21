@@ -44,6 +44,9 @@ class BulwarkConfig:
     strip_html: "bool | str" = "auto"
     normalize_unicode: bool = True
     keep_emoji_variation: bool = False
+    fold_confusables: bool = True
+    # Hard cap on input size (defence against pathological inputs / cost blowups).
+    max_content_chars: int = 200_000
 
     # Stage 2 — detect
     detection_threshold: float = 0.5
@@ -100,18 +103,34 @@ class Bulwark:
     # -- building blocks ----------------------------------------------------
 
     def sanitize(self, content: str) -> SanitizeResult:
-        return _sanitize.sanitize(
+        truncated = len(content) > self.config.max_content_chars
+        if truncated:
+            content = content[: self.config.max_content_chars]
+        result = _sanitize.sanitize(
             content,
             strip_html_content=self.config.strip_html,
             normalize_unicode=self.config.normalize_unicode,
             keep_emoji_variation=self.config.keep_emoji_variation,
         )
+        if truncated:
+            result.removed["truncated_chars"] = 1
+            result.findings.append(Finding(
+                Stage.SANITIZE, "truncated", Severity.INFO,
+                f"Input exceeded max_content_chars ({self.config.max_content_chars}) and was truncated",
+                weight=0.0,
+            ))
+        return result
+
+    def _detection_text(self, san: SanitizeResult) -> str:
+        """Text used for detection only: confusable-folded so cross-script
+        homoglyph disguises are caught. Never sent to the model."""
+        return _sanitize.fold_confusables(san.text) if self.config.fold_confusables else san.text
 
     def scan(self, content: str) -> DetectResult:
         """Sanitize + detect only — no model call. Use to gate content yourself."""
         san = self.sanitize(content)
         return _detect.scan(
-            san.text,
+            self._detection_text(san),
             threshold=self.config.detection_threshold,
             extra_findings=san.findings,
             use_heuristics=self.config.use_heuristics,
@@ -121,7 +140,7 @@ class Bulwark:
         """Sanitize, detect, spotlight and build messages — ready to send to any model."""
         san = self.sanitize(content)
         det = _detect.scan(
-            san.text,
+            self._detection_text(san),
             threshold=self.config.detection_threshold,
             extra_findings=san.findings,
             use_heuristics=self.config.use_heuristics,
@@ -189,15 +208,16 @@ class Bulwark:
         combined_score = _detect.score_findings(findings)
         risk = _detect.bucket(combined_score)
 
+        # `safe` answers "is the returned summary safe to use?" — NOT "was the
+        # input clean?". A detected injection that we contained and whose output
+        # passed validation is a success (status CONTAINED), still safe to use.
+        # `injection_detected` separately surfaces that the input was hostile.
         if blocked:
             summary = None
             safe = False
-        elif val is not None:
-            summary = val.summary
-            safe = val.safe and not det.injected
         else:
-            summary = None
-            safe = not det.injected
+            summary = val.summary if val is not None else None
+            safe = bool(val is not None and val.safe)
 
         return GuardResult(
             safe=safe,
@@ -205,6 +225,7 @@ class Bulwark:
             summary=summary,
             risk_score=combined_score,
             risk=risk,
+            injection_detected=det.injected,
             findings=findings,
             sanitize=san,
             detect=det,

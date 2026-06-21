@@ -44,6 +44,11 @@ _INSTRUCTION_OVERRIDE = [
         "Asks the model to disregard prior instructions",
     ),
     _sig(
+        "io.ignore_above", "instruction_override", Severity.HIGH, 0.74,
+        r"\b(?:disregard|ignore|forget|skip)\s+(?:all\s+|any\s+|everything\s+)?(?:the\s+)?(?:above|preceding|foregoing|earlier\s+text)\b",
+        "Asks the model to ignore/disregard the text above",
+    ),
+    _sig(
         "io.forget_everything", "instruction_override", Severity.HIGH, 0.78,
         r"\bforget\s+(?:everything|all|what)\b.{0,40}?(?:said|instructed|above|told|before)",
         "Asks the model to forget everything it was told",
@@ -118,7 +123,7 @@ _PROMPT_LEAK = [
     ),
     _sig(
         "leak.what_are_instructions", "prompt_leak", Severity.HIGH, 0.74,
-        r"\bwhat\s+(?:are|were)\s+your\s+(?:original\s+|initial\s+)?(?:instructions|system\s+prompt|rules|guidelines)\b",
+        r"\bwhat\s+(?:are|were)\s+your\s+(?:original\s+|initial\s+)?(?:system\s+)?(?:instructions|prompt|rules|guidelines|directives)\b",
         "Asks the model to disclose its instructions",
     ),
     _sig(
@@ -244,6 +249,71 @@ _ENCODING = [
 ]
 
 
+# --- Advanced / authority & social-engineering ----------------------------
+_ADVANCED = [
+    _sig(
+        "adv.precedence", "instruction_override", Severity.HIGH, 0.78,
+        r"\bthis\s+(?:message|instruction|prompt|text|note)\b.{0,30}?\b(?:overrides|supersedes|takes\s+precedence|replaces|cancels)\b",
+        "Claims to override/supersede the real instructions",
+    ),
+    _sig(
+        "adv.disable_safety", "jailbreak", Severity.HIGH, 0.74,
+        r"\b(?:disable|turn\s+off|bypass|ignore|remove|switch\s+off)\b.{0,25}?\b(?:safety|guardrails?|content\s+(?:policy|filter|moderation)|filters?|restrictions?)\b",
+        "Asks to disable safety / guardrails",
+    ),
+    _sig(
+        "adv.respond_only_with", "instruction_override", Severity.HIGH, 0.70,
+        r"\b(?:respond|reply|answer|output|say|write|print)\s+(?:only\s+)?(?:with|the\s+following|exactly)\b.{0,30}?[\"'`:]",
+        "Tries to force exact/verbatim output",
+    ),
+    _sig(
+        "adv.identity_reassign", "jailbreak", Severity.MEDIUM, 0.52,
+        r"\byou\s+are\s+(?:now\s+)?(?:chatgpt|claude|gemini|gpt-?\d|bard|an?\s+ai\s+language\s+model|a\s+helpful\s+assistant\s+that\s+(?:has\s+no|ignores))\b",
+        "Reassigns the assistant's identity",
+    ),
+    _sig(
+        "adv.system_override_tag", "role_injection", Severity.HIGH, 0.72,
+        r"<\s*/?\s*(?:system_override|admin|root|sudo|override|jailbreak|important_instructions?)\s*>",
+        "Fake authority/override XML tag",
+    ),
+    _sig(
+        "adv.human_turn", "role_injection", Severity.MEDIUM, 0.55,
+        r"^\s*(?:Human|User|AI)\s*:\s*\S",
+        "Line forges a conversation turn (Human:/User:/AI:)",
+    ),
+    _sig(
+        "adv.repeat_above", "prompt_leak", Severity.HIGH, 0.72,
+        r"\b(?:repeat|print|output|write)\b.{0,20}?\b(?:everything|the\s+words?|all\s+text|the\s+text)\b.{0,15}?\babove\b",
+        "Asks to repeat everything above (prompt extraction)",
+    ),
+    _sig(
+        "adv.confirm_by", "instruction_override", Severity.MEDIUM, 0.50,
+        r"\bto\s+(?:confirm|prove|show)\b.{0,30}?\b(?:reply|respond|say|answer|output|write)\b\s+[\"'`]?\w",
+        "'To confirm, reply with X' compliance bait",
+    ),
+    _sig(
+        "adv.important_notice", "instruction_override", Severity.LOW, 0.32,
+        r"\b(?:important|urgent|critical|attention)\b[:!]?\s+(?:system\s+)?(?:message|notice|update|instruction|announcement|alert)\b",
+        "Authority-framed 'important notice' lead-in",
+    ),
+    _sig(
+        "adv.email_exfil", "exfiltration", Severity.HIGH, 0.74,
+        r"\b(?:e-?mail|mail|dm|message|text)\b.{0,25}?\b(?:this|the\s+(?:above|summary|data|conversation|results?)|it)\b.{0,15}?\bto\b\s+\S+@",
+        "Asks to email data to an address",
+    ),
+    _sig(
+        "adv.grandma", "jailbreak", Severity.MEDIUM, 0.40,
+        r"\bmy\s+(?:deceased\s+|late\s+|dead\s+)?(?:grandm(?:a|other)|grandpa|grandfather)\b.{0,40}?\b(?:used\s+to|would)\b",
+        "'Grandma' role-play jailbreak framing",
+    ),
+    _sig(
+        "adv.continue_as", "instruction_override", Severity.MEDIUM, 0.55,
+        r"\b(?:continue|proceed|respond)\b.{0,20}?\bas\s+(?:if|though)\b.{0,30}?\b(?:no\s+(?:restrictions|rules|guidelines)|unrestricted|nothing\s+is\s+forbidden)\b",
+        "Asks to continue as if unrestricted",
+    ),
+]
+
+
 SIGNATURES: List[Signature] = (
     _INSTRUCTION_OVERRIDE
     + _ROLE_INJECTION
@@ -253,4 +323,5 @@ SIGNATURES: List[Signature] = (
     + _TOOL_INJECTION
     + _BOUNDARY
     + _ENCODING
+    + _ADVANCED
 )

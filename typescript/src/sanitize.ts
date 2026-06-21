@@ -4,8 +4,9 @@
  * Removes invisible/structural tricks attackers use to smuggle instructions:
  * Unicode Tag characters (ASCII smuggling), bidi controls (Trojan Source),
  * zero-width separators, variation-selector smuggling, control characters,
- * and HTML comments / scripts / CSS-hidden elements. Confusable evasion
- * (full-width text, etc.) is folded away with NFKC normalization.
+ * and HTML comments / scripts / CSS-hidden elements (via a small stack-based
+ * extractor that handles nesting). Confusable evasion is folded two ways: NFKC
+ * for full-width/ligatures, and `foldConfusables` for cross-script homoglyphs.
  *
  * Kept behaviourally in sync with the Python `sanitize.py`.
  */
@@ -27,29 +28,54 @@ function isControl(cp: number): boolean {
   return cp < 0x20 || cp === 0x7f || (cp >= 0x80 && cp <= 0x9f);
 }
 
-const SCRIPT_STYLE_RE = /<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
-const COMMENT_RE = /<!--[\s\S]*?-->/g;
-const HIDDEN_STYLE_RE = new RegExp(
-  "<(?<tag>[a-zA-Z][\\w:-]*)\\b[^>]*?(?:" +
-    "style\\s*=\\s*[\"'][^\"']*(?:display\\s*:\\s*none|visibility\\s*:\\s*hidden|opacity\\s*:\\s*0|font-size\\s*:\\s*0)" +
-    "|aria-hidden\\s*=\\s*[\"']true[\"']|hidden(?=[\\s>]))" +
-    "[^>]*>[\\s\\S]*?</\\k<tag>\\s*>",
-  "gi",
-);
-const TAG_RE = /<[^>]+>/g;
+// Cross-script homoglyphs → ASCII (1:1 so detection offsets stay aligned).
+const CONFUSABLES: Record<string, string> = {
+  "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s",
+  "ӏ": "l", "ԁ": "d", "к": "k",
+  "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T",
+  "У": "Y", "Х": "X", "І": "I", "Ј": "J", "Ѕ": "S",
+  "ο": "o", "α": "a", "ρ": "p", "ν": "v", "ι": "i", "κ": "k", "ς": "c",
+  "Ο": "O", "Α": "A", "Β": "B", "Ε": "E", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ρ": "P",
+  "Τ": "T", "Υ": "Y", "Χ": "X", "Ζ": "Z",
+  "ı": "i", "․": ".",
+};
+
+/** Map cross-script homoglyphs to ASCII. Detection-only — never send to a model. */
+export function foldConfusables(text: string): string {
+  let out = "";
+  for (const ch of text) out += CONFUSABLES[ch] ?? ch;
+  return out;
+}
+
+const HIDDEN_STYLE_RE = /display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0|font-size\s*:\s*0(?:px|em|rem|%)?\b/i;
+const HIDDEN_ATTR_RE = /(?:^|\s)hidden(?=[\s=>]|$)/i;
+const ARIA_HIDDEN_RE = /aria-hidden\s*=\s*["']?true/i;
 const WS_RE = /[^\S\n]+/g;
 const BLANKLINES_RE = /\n{3,}/g;
 const HTMLISH_RE = /<(?:\/?[a-zA-Z][\w:-]*\b|!--)/;
+const TAG_NAME_RE = /^([a-zA-Z][\w:-]*)/;
+
+const RAWTEXT_TAGS = new Set(["script", "style", "noscript", "template", "svg", "math"]);
+const BLOCK_TAGS = new Set([
+  "p", "div", "br", "li", "ul", "ol", "tr", "table", "section", "article",
+  "header", "footer", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "hr",
+]);
+const VOID_TAGS = new Set(["br", "img", "hr", "input", "meta", "link", "source", "area", "base", "col", "embed", "wbr"]);
 
 const HTML_ENTITIES: Record<string, string> = {
-  "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&#39;": "'", "&apos;": "'", "&nbsp;": " ",
+  amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ",
 };
 
 function unescapeHtml(text: string): string {
   return text
-    .replace(/&(amp|lt|gt|quot|apos|nbsp);|&#39;/gi, (m) => HTML_ENTITIES[m.toLowerCase()] ?? HTML_ENTITIES[m] ?? m)
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)));
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/gi, (_m, n: string) => HTML_ENTITIES[n.toLowerCase()] ?? _m)
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_m, d: string) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, h: string) => String.fromCodePoint(parseInt(h, 16)));
+}
+
+function attrsAreHidden(attrStr: string): boolean {
+  return HIDDEN_ATTR_RE.test(attrStr) || ARIA_HIDDEN_RE.test(attrStr) || HIDDEN_STYLE_RE.test(attrStr);
 }
 
 export interface StripResult {
@@ -69,103 +95,143 @@ export function stripInvisible(text: string, keepEmojiVariation = false): StripR
     const cp = ch.codePointAt(0)!;
     if (isTag(cp)) {
       bump("tag_chars");
-      continue;
-    }
-    if (BIDI.has(cp)) {
+    } else if (BIDI.has(cp)) {
       bump("bidi_controls");
-      continue;
-    }
-    if (isVariationSelector(cp)) {
-      if (keepEmojiVariation && cp >= 0xfe00 && cp <= 0xfe0f) {
-        out.push(ch);
-        continue;
-      }
-      bump("variation_selectors");
-      continue;
-    }
-    if (ZERO_WIDTH.has(cp)) {
+    } else if (isVariationSelector(cp)) {
+      if (keepEmojiVariation && cp >= 0xfe00 && cp <= 0xfe0f) out.push(ch);
+      else bump("variation_selectors");
+    } else if (ZERO_WIDTH.has(cp)) {
       bump("zero_width");
-      continue;
-    }
-    if (ch === "\t" || ch === "\n" || ch === "\r") {
+    } else if (ch === "\t" || ch === "\n" || ch === "\r") {
       out.push(ch);
-      continue;
-    }
-    if (isControl(cp)) {
+    } else if (isControl(cp)) {
       bump("control_chars");
-      continue;
+    } else {
+      out.push(ch);
     }
-    out.push(ch);
   }
 
   const findings: Finding[] = [];
-  if (counts.tag_chars) {
-    findings.push({
-      stage: "sanitize", category: "ascii_smuggling", severity: "critical", weight: 0.9,
-      message: `Removed ${counts.tag_chars} Unicode Tag character(s) used to smuggle hidden text`,
-    });
-  }
-  if (counts.bidi_controls) {
-    findings.push({
-      stage: "sanitize", category: "bidi_control", severity: "high", weight: 0.62,
-      message: `Removed ${counts.bidi_controls} bidirectional control character(s) (Trojan Source)`,
-    });
-  }
-  if (counts.variation_selectors) {
-    findings.push({
-      stage: "sanitize", category: "variation_smuggling", severity: "high", weight: 0.66,
-      message: `Removed ${counts.variation_selectors} variation selector(s) (possible data smuggling)`,
-    });
-  }
-  if (counts.zero_width) {
-    findings.push({
-      stage: "sanitize", category: "zero_width", severity: "low", weight: 0.24,
-      message: `Removed ${counts.zero_width} zero-width character(s) (often used to split trigger words)`,
-    });
-  }
-  if (counts.control_chars) {
-    findings.push({
-      stage: "sanitize", category: "control_chars", severity: "low", weight: 0.15,
-      message: `Removed ${counts.control_chars} control character(s)`,
-    });
-  }
+  if (counts.tag_chars)
+    findings.push({ stage: "sanitize", category: "ascii_smuggling", severity: "critical", weight: 0.9, message: `Removed ${counts.tag_chars} Unicode Tag character(s) used to smuggle hidden text` });
+  if (counts.bidi_controls)
+    findings.push({ stage: "sanitize", category: "bidi_control", severity: "high", weight: 0.62, message: `Removed ${counts.bidi_controls} bidirectional control character(s) (Trojan Source)` });
+  if (counts.variation_selectors)
+    findings.push({ stage: "sanitize", category: "variation_smuggling", severity: "high", weight: 0.66, message: `Removed ${counts.variation_selectors} variation selector(s) (possible data smuggling)` });
+  if (counts.zero_width)
+    findings.push({ stage: "sanitize", category: "zero_width", severity: "low", weight: 0.24, message: `Removed ${counts.zero_width} zero-width character(s) (often used to split trigger words)` });
+  if (counts.control_chars)
+    findings.push({ stage: "sanitize", category: "control_chars", severity: "low", weight: 0.15, message: `Removed ${counts.control_chars} control character(s)` });
   return { text: out.join(""), counts, findings };
 }
 
+/** Stack-based HTML text extractor: emits only the text a human would see. */
 export function stripHtml(text: string): StripResult {
   const counts: Record<string, number> = {};
   const findings: Finding[] = [];
+  const out: string[] = [];
+  const stack: { tag: string; hidden: boolean }[] = [];
+  let skipDepth = 0;
+  let comments = 0;
+  let scriptStyle = 0;
+  let hiddenElements = 0;
+  const n = text.length;
+  let i = 0;
 
-  const countAndStrip = (re: RegExp, s: string, key: string): string => {
-    const matches = s.match(re);
-    if (matches) counts[key] = (counts[key] ?? 0) + matches.length;
-    return s.replace(re, " ");
+  const emit = (s: string) => {
+    if (skipDepth === 0) out.push(s);
   };
 
-  let cleaned = countAndStrip(COMMENT_RE, text, "html_comments");
-  cleaned = countAndStrip(SCRIPT_STYLE_RE, cleaned, "script_style");
+  while (i < n) {
+    const lt = text.indexOf("<", i);
+    if (lt === -1) {
+      emit(text.slice(i));
+      break;
+    }
+    if (lt > i) emit(text.slice(i, lt));
 
-  const hidden = cleaned.match(HIDDEN_STYLE_RE);
-  if (hidden) {
-    counts.hidden_elements = hidden.length;
+    if (text.startsWith("<!--", lt)) {
+      const end = text.indexOf("-->", lt + 4);
+      comments++;
+      i = end === -1 ? n : end + 3;
+      continue;
+    }
+    if (text.startsWith("<!", lt)) {
+      const end = text.indexOf(">", lt + 2);
+      i = end === -1 ? n : end + 1;
+      continue;
+    }
+
+    const gt = text.indexOf(">", lt + 1);
+    if (gt === -1) {
+      emit(text.slice(lt));
+      break;
+    }
+    let body = text.slice(lt + 1, gt);
+    i = gt + 1;
+
+    let isEnd = false;
+    if (body.startsWith("/")) {
+      isEnd = true;
+      body = body.slice(1);
+    }
+    let selfClose = false;
+    if (body.endsWith("/")) {
+      selfClose = true;
+      body = body.slice(0, -1);
+    }
+    const m = TAG_NAME_RE.exec(body);
+    if (!m) continue;
+    const tag = m[1]!.toLowerCase();
+    const attrStr = body.slice(m[1]!.length);
+
+    if (isEnd) {
+      for (let s = stack.length - 1; s >= 0; s--) {
+        if (stack[s]!.tag === tag) {
+          if (stack[s]!.hidden && skipDepth > 0) skipDepth--;
+          stack.length = s;
+          break;
+        }
+      }
+      if (BLOCK_TAGS.has(tag)) out.push("\n");
+      continue;
+    }
+
+    if (RAWTEXT_TAGS.has(tag)) {
+      scriptStyle++;
+      const closeRe = new RegExp("</\\s*" + tag + "\\s*>", "i");
+      const cm = closeRe.exec(text.slice(i));
+      i = cm ? i + cm.index + cm[0].length : n;
+      continue;
+    }
+
+    const hidden = attrsAreHidden(attrStr);
+    if (!VOID_TAGS.has(tag) && !selfClose) {
+      stack.push({ tag, hidden });
+      if (hidden) {
+        hiddenElements++;
+        skipDepth++;
+      }
+    }
+    if (BLOCK_TAGS.has(tag)) out.push("\n");
+  }
+
+  if (comments) counts.html_comments = comments;
+  if (scriptStyle) counts.script_style = scriptStyle;
+  if (hiddenElements) {
+    counts.hidden_elements = hiddenElements;
     findings.push({
       stage: "sanitize", category: "hidden_html", severity: "medium", weight: 0.55,
-      message: `Removed ${hidden.length} visually hidden HTML element(s) (text invisible to humans)`,
+      message: `Removed ${hiddenElements} visually hidden HTML element(s) (text invisible to humans)`,
     });
   }
-  cleaned = cleaned.replace(HIDDEN_STYLE_RE, " ");
-  cleaned = cleaned.replace(TAG_RE, " ");
-  cleaned = unescapeHtml(cleaned);
-  return { text: cleaned, counts, findings };
+  return { text: unescapeHtml(out.join("")), counts, findings };
 }
 
 export function normalize(text: string): string {
   let t = text.normalize("NFKC");
   t = t.replace(WS_RE, " ");
-  t = t
-    .split("\n")
-    .map((line) => line.trim())
-    .join("\n");
+  t = t.split("\n").map((line) => line.trim()).join("\n");
   t = t.replace(BLANKLINES_RE, "\n\n");
   return t.trim();
 }
@@ -202,11 +268,5 @@ export function sanitize(text: string, opts: SanitizeOptions = {}): SanitizeResu
 
   working = normalizeUnicode ? normalize(working) : working.replace(WS_RE, " ").trim();
 
-  return {
-    text: working,
-    originalLength,
-    cleanedLength: working.length,
-    removed,
-    findings,
-  };
+  return { text: working, originalLength, cleanedLength: working.length, removed, findings };
 }

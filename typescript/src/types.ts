@@ -73,9 +73,13 @@ export type LLM = (messages: Messages) => string | Promise<string>;
 export interface GuardResult {
   safe: boolean;
   blocked: boolean;
+  /** True if an injection attempt was detected in the input (independent of `safe`). */
+  injectionDetected: boolean;
   summary: string | null;
   riskScore: number;
   risk: Severity;
+  /** One-word verdict: BLOCKED, UNSAFE, CONTAINED, or SAFE. */
+  status: "BLOCKED" | "UNSAFE" | "CONTAINED" | "SAFE";
   findings: Finding[];
   sanitize?: SanitizeResult;
   detect?: DetectResult;
@@ -87,7 +91,7 @@ export interface GuardResult {
 
 /** Render a short human-readable report for a guard result. */
 export function formatReport(
-  status: "BLOCKED" | "SAFE" | "FLAGGED",
+  status: "BLOCKED" | "UNSAFE" | "CONTAINED" | "SAFE",
   risk: Severity,
   score: number,
   findings: Finding[],

@@ -6,7 +6,7 @@
 import { bucket, detect, scoreFindings } from "./detect.js";
 import { buildMessages } from "./prompt.js";
 import { DEFAULT_MARKER, spotlight } from "./spotlight.js";
-import { sanitize } from "./sanitize.js";
+import { foldConfusables, sanitize } from "./sanitize.js";
 import { validateOutput } from "./validate.js";
 import {
   formatReport,
@@ -28,6 +28,9 @@ export interface BulwarkConfig {
   stripHtml: boolean | "auto";
   normalizeUnicode: boolean;
   keepEmojiVariation: boolean;
+  foldConfusables: boolean;
+  /** Hard cap on input size (defence against pathological inputs / cost blowups). */
+  maxContentChars: number;
   // Stage 2 — detect
   detectionThreshold: number;
   useHeuristics: boolean;
@@ -51,6 +54,8 @@ export function balancedConfig(): BulwarkConfig {
     stripHtml: "auto",
     normalizeUnicode: true,
     keepEmojiVariation: false,
+    foldConfusables: true,
+    maxContentChars: 200_000,
     detectionThreshold: 0.5,
     useHeuristics: true,
     blockBeforeLlm: null,
@@ -93,17 +98,33 @@ export class Bulwark {
   }
 
   sanitize(content: string): SanitizeResult {
-    return sanitize(content, {
+    let working = content;
+    const truncated = working.length > this.config.maxContentChars;
+    if (truncated) working = working.slice(0, this.config.maxContentChars);
+    const result = sanitize(working, {
       stripHtmlContent: this.config.stripHtml,
       normalizeUnicode: this.config.normalizeUnicode,
       keepEmojiVariation: this.config.keepEmojiVariation,
     });
+    if (truncated) {
+      result.removed.truncated_chars = 1;
+      result.findings.push({
+        stage: "sanitize", category: "truncated", severity: "info", weight: 0,
+        message: `Input exceeded maxContentChars (${this.config.maxContentChars}) and was truncated`,
+      });
+    }
+    return result;
+  }
+
+  /** Detection-only text: confusable-folded so homoglyph disguises are caught. */
+  private detectionText(san: SanitizeResult): string {
+    return this.config.foldConfusables ? foldConfusables(san.text) : san.text;
   }
 
   /** Sanitize + detect only — no model call. Use to gate content yourself. */
   scan(content: string): DetectResult {
     const san = this.sanitize(content);
-    return detect(san.text, {
+    return detect(this.detectionText(san), {
       threshold: this.config.detectionThreshold,
       extraFindings: san.findings,
       useHeuristics: this.config.useHeuristics,
@@ -113,7 +134,7 @@ export class Bulwark {
   /** Sanitize, detect, spotlight and build messages — ready for any model. */
   prepare(content: string): PreparedRequest {
     const san = this.sanitize(content);
-    const det = detect(san.text, {
+    const det = detect(this.detectionText(san), {
       threshold: this.config.detectionThreshold,
       extraFindings: san.findings,
       useHeuristics: this.config.useHeuristics,
@@ -164,26 +185,28 @@ export class Bulwark {
     const riskScore = scoreFindings(findings);
     const risk = bucket(riskScore);
 
+    // `safe` answers "is the returned summary safe to use?" — not "was the input
+    // clean?". A contained injection whose output passed validation is a success.
+    const injectionDetected = det.injected;
     let summary: string | null;
     let safe: boolean;
     if (blocked) {
       summary = null;
       safe = false;
-    } else if (val) {
-      summary = val.summary;
-      safe = val.safe && !det.injected;
     } else {
-      summary = null;
-      safe = !det.injected;
+      summary = val ? val.summary : null;
+      safe = !!(val && val.safe);
     }
 
-    const status = blocked ? "BLOCKED" : safe ? "SAFE" : "FLAGGED";
+    const status = blocked ? "BLOCKED" : !safe ? "UNSAFE" : injectionDetected ? "CONTAINED" : "SAFE";
     return {
       safe,
       blocked,
+      injectionDetected,
       summary,
       riskScore,
       risk,
+      status,
       findings,
       sanitize: san,
       detect: det,

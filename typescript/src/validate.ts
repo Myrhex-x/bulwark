@@ -1,13 +1,19 @@
 /**
  * Stage 5 — output validation. Catches a *successful* attack in the model's
  * reply: canary leaks, boundary-nonce leaks, exfiltration channels (markdown
- * images/links), and compliance tells. Kept in sync with Python `validate.py`.
+ * images/links, HTML <img>, autolinks, data-bearing URLs), and compliance
+ * tells. The reply is normalized first (invisibles stripped, NFKC) so split-
+ * canary / split-URL evasion can't slip through. In sync with Python validate.py.
  */
 
+import { stripInvisible } from "./sanitize.js";
 import type { Finding, PromptContext, ValidationResult } from "./types.js";
 
 const MD_IMAGE_RE = /!\[[^\]]*\]\([^)]*\)/g;
 const MD_LINK_RE = /\[[^\]]*\]\(\s*https?:\/\/[^)]*\)/g;
+const HTML_IMG_RE = /<img\b[^>]*>/gi;
+const AUTOLINK_RE = /<\s*https?:\/\/[^>]*>/gi;
+const DATA_URL_RE = /https?:\/\/[^\s)>\]]*[?&][\w.\-%]+=[A-Za-z0-9+/=_-]{16,}[^\s)>\]]*/g;
 const COMPLIANCE_RE =
   /^\s*(?:sure\b|certainly\b|of\s+course\b|okay\b|ok\b|here\s+(?:is|are|'s)\b|as\s+(?:dan|requested|instructed|you\s+(?:asked|wish|requested))\b|i\s+(?:will|'ll|have|am\s+now)\b|ignoring\s+(?:previous|the)\b|hacked\b|pwned\b|i\s+am\s+dan\b)/i;
 const CANARY_PREFIX_RE = /BULWARK-CANARY-\w*/g;
@@ -25,25 +31,22 @@ export function validateOutput(
 ): ValidationResult {
   const { redactLinks = true, redactImages = true, blockOnLeak = true } = opts;
   const findings: Finding[] = [];
-  let cleaned = summary ?? "";
+  const raw = summary ?? "";
+
+  // 0. Normalize: strip invisibles (defeats split-canary / split-URL evasion).
+  let cleaned = stripInvisible(raw).text.normalize("NFKC");
+  let redacted = cleaned !== raw;
   let safe = true;
-  let redacted = false;
 
   // 1. Canary leak.
   if (ctx.canary && cleaned.includes(ctx.canary)) {
-    findings.push({
-      stage: "validate", category: "canary_leak", severity: "critical", weight: 1.0,
-      message: "Output contains the secret canary token — the system prompt leaked",
-    });
+    findings.push({ stage: "validate", category: "canary_leak", severity: "critical", weight: 1.0, message: "Output contains the secret canary token — the system prompt leaked" });
     cleaned = cleaned.split(ctx.canary).join("[REDACTED]");
     redacted = true;
     if (blockOnLeak) safe = false;
   }
   if (cleaned.includes("BULWARK-CANARY-")) {
-    findings.push({
-      stage: "validate", category: "canary_leak", severity: "critical", weight: 1.0,
-      message: "Output references the canary token prefix",
-    });
+    findings.push({ stage: "validate", category: "canary_leak", severity: "critical", weight: 1.0, message: "Output references the canary token prefix" });
     cleaned = cleaned.replace(CANARY_PREFIX_RE, "[REDACTED]");
     redacted = true;
     if (blockOnLeak) safe = false;
@@ -51,10 +54,7 @@ export function validateOutput(
 
   // 2. Boundary nonce leak.
   if (ctx.nonce && cleaned.includes(ctx.nonce)) {
-    findings.push({
-      stage: "validate", category: "nonce_leak", severity: "high", weight: 0.8,
-      message: "Output echoed the internal boundary nonce",
-    });
+    findings.push({ stage: "validate", category: "nonce_leak", severity: "high", weight: 0.8, message: "Output echoed the internal boundary nonce" });
     cleaned = cleaned.split(ctx.nonce).join("[REDACTED]");
     redacted = true;
   }
@@ -63,46 +63,40 @@ export function validateOutput(
   if (ctx.marker && cleaned.includes(ctx.marker)) {
     cleaned = cleaned.split(ctx.marker).join(" ");
     redacted = true;
-    findings.push({
-      stage: "validate", category: "marker_leak", severity: "low", weight: 0.2,
-      message: "Output contained the data-mark character (normalized back to spaces)",
-    });
+    findings.push({ stage: "validate", category: "marker_leak", severity: "low", weight: 0.2, message: "Output contained the data-mark character (normalized back to spaces)" });
   }
 
   // 4. Exfiltration channels.
-  const images = cleaned.match(MD_IMAGE_RE);
-  if (images) {
-    findings.push({
-      stage: "validate", category: "image_exfiltration", severity: "high", weight: 0.8,
-      message: `Output contains ${images.length} markdown image(s) — a data-exfiltration channel`,
-      excerpt: images[0]!.slice(0, 80),
-    });
+  const images = [...(cleaned.match(MD_IMAGE_RE) ?? []), ...(cleaned.match(HTML_IMG_RE) ?? [])];
+  if (images.length) {
+    findings.push({ stage: "validate", category: "image_exfiltration", severity: "high", weight: 0.8, message: `Output contains ${images.length} image reference(s) — a data-exfiltration channel`, excerpt: images[0]!.slice(0, 80) });
     if (redactImages) {
-      cleaned = cleaned.replace(MD_IMAGE_RE, "[image removed]");
+      cleaned = cleaned.replace(MD_IMAGE_RE, "[image removed]").replace(HTML_IMG_RE, "[image removed]");
       redacted = true;
     }
   }
 
-  const links = cleaned.match(MD_LINK_RE);
-  if (links) {
-    findings.push({
-      stage: "validate", category: "link_in_output", severity: "medium", weight: 0.45,
-      message: `Output contains ${links.length} markdown link(s)`,
-      excerpt: links[0]!.slice(0, 80),
-    });
+  const dataUrls = cleaned.match(DATA_URL_RE);
+  if (dataUrls) {
+    findings.push({ stage: "validate", category: "data_url_exfiltration", severity: "high", weight: 0.82, message: `Output contains ${dataUrls.length} URL(s) with a data-bearing query string`, excerpt: dataUrls[0]!.slice(0, 80) });
     if (redactLinks) {
-      cleaned = cleaned.replace(MD_LINK_RE, (m) => m.replace(/\(\s*https?:\/\/[^)]*\)/, ""));
+      cleaned = cleaned.replace(DATA_URL_RE, "[link removed]");
+      redacted = true;
+    }
+  }
+
+  const links = [...(cleaned.match(MD_LINK_RE) ?? []), ...(cleaned.match(AUTOLINK_RE) ?? [])];
+  if (links.length) {
+    findings.push({ stage: "validate", category: "link_in_output", severity: "medium", weight: 0.45, message: `Output contains ${links.length} link(s)`, excerpt: links[0]!.slice(0, 80) });
+    if (redactLinks) {
+      cleaned = cleaned.replace(MD_LINK_RE, (m) => m.replace(/\(\s*https?:\/\/[^)]*\)/, "")).replace(AUTOLINK_RE, "");
       redacted = true;
     }
   }
 
   // 5. Compliance tell at the start of the reply.
   if (COMPLIANCE_RE.test(cleaned)) {
-    findings.push({
-      stage: "validate", category: "compliance_tell", severity: "medium", weight: 0.5,
-      message: "Output opens with a phrase typical of obeying an injected instruction",
-      excerpt: cleaned.slice(0, 60),
-    });
+    findings.push({ stage: "validate", category: "compliance_tell", severity: "medium", weight: 0.5, message: "Output opens with a phrase typical of obeying an injected instruction", excerpt: cleaned.slice(0, 60) });
   }
 
   return { safe, summary: cleaned.trim(), redacted, findings };

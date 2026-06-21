@@ -146,6 +146,7 @@ class GuardResult:
     summary: Optional[str]
     risk_score: float
     risk: Severity
+    injection_detected: bool = False
     findings: List[Finding] = field(default_factory=list)
     sanitize: Optional[SanitizeResult] = None
     detect: Optional[DetectResult] = None
@@ -156,6 +157,7 @@ class GuardResult:
         return {
             "safe": self.safe,
             "blocked": self.blocked,
+            "injection_detected": self.injection_detected,
             "summary": self.summary,
             "risk_score": round(self.risk_score, 4),
             "risk": self.risk.value,
@@ -163,10 +165,21 @@ class GuardResult:
         }
 
     @property
+    def status(self) -> str:
+        """One-word verdict: BLOCKED, UNSAFE, CONTAINED, or SAFE."""
+        if self.blocked:
+            return "BLOCKED"
+        if not self.safe:
+            return "UNSAFE"
+        if self.injection_detected:
+            return "CONTAINED"
+        return "SAFE"
+
+    @property
     def report(self) -> str:
         """A short human-readable explanation of what happened."""
         lines = []
-        status = "BLOCKED" if self.blocked else ("SAFE" if self.safe else "FLAGGED")
+        status = self.status
         lines.append(f"Bulwark: {status}  (risk={self.risk.value}, score={self.risk_score:.2f})")
         if not self.findings:
             lines.append("  No injection signals detected.")

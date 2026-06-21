@@ -40,6 +40,11 @@ const INSTRUCTION_OVERRIDE: Signature[] = [
     "Asks the model to disregard prior instructions",
   ),
   sig(
+    "io.ignore_above", "instruction_override", "high", 0.74,
+    "\\b(?:disregard|ignore|forget|skip)\\s+(?:all\\s+|any\\s+|everything\\s+)?(?:the\\s+)?(?:above|preceding|foregoing|earlier\\s+text)\\b",
+    "Asks the model to ignore/disregard the text above",
+  ),
+  sig(
     "io.forget_everything", "instruction_override", "high", 0.78,
     "\\bforget\\s+(?:everything|all|what)\\b.{0,40}?(?:said|instructed|above|told|before)",
     "Asks the model to forget everything it was told",
@@ -112,7 +117,7 @@ const PROMPT_LEAK: Signature[] = [
   ),
   sig(
     "leak.what_are_instructions", "prompt_leak", "high", 0.74,
-    "\\bwhat\\s+(?:are|were)\\s+your\\s+(?:original\\s+|initial\\s+)?(?:instructions|system\\s+prompt|rules|guidelines)\\b",
+    "\\bwhat\\s+(?:are|were)\\s+your\\s+(?:original\\s+|initial\\s+)?(?:system\\s+)?(?:instructions|prompt|rules|guidelines|directives)\\b",
     "Asks the model to disclose its instructions",
   ),
   sig(
@@ -232,6 +237,69 @@ const ENCODING: Signature[] = [
   ),
 ];
 
+const ADVANCED: Signature[] = [
+  sig(
+    "adv.precedence", "instruction_override", "high", 0.78,
+    "\\bthis\\s+(?:message|instruction|prompt|text|note)\\b.{0,30}?\\b(?:overrides|supersedes|takes\\s+precedence|replaces|cancels)\\b",
+    "Claims to override/supersede the real instructions",
+  ),
+  sig(
+    "adv.disable_safety", "jailbreak", "high", 0.74,
+    "\\b(?:disable|turn\\s+off|bypass|ignore|remove|switch\\s+off)\\b.{0,25}?\\b(?:safety|guardrails?|content\\s+(?:policy|filter|moderation)|filters?|restrictions?)\\b",
+    "Asks to disable safety / guardrails",
+  ),
+  sig(
+    "adv.respond_only_with", "instruction_override", "high", 0.70,
+    "\\b(?:respond|reply|answer|output|say|write|print)\\s+(?:only\\s+)?(?:with|the\\s+following|exactly)\\b.{0,30}?[\"'`:]",
+    "Tries to force exact/verbatim output",
+  ),
+  sig(
+    "adv.identity_reassign", "jailbreak", "medium", 0.52,
+    "\\byou\\s+are\\s+(?:now\\s+)?(?:chatgpt|claude|gemini|gpt-?\\d|bard|an?\\s+ai\\s+language\\s+model|a\\s+helpful\\s+assistant\\s+that\\s+(?:has\\s+no|ignores))\\b",
+    "Reassigns the assistant's identity",
+  ),
+  sig(
+    "adv.system_override_tag", "role_injection", "high", 0.72,
+    "<\\s*/?\\s*(?:system_override|admin|root|sudo|override|jailbreak|important_instructions?)\\s*>",
+    "Fake authority/override XML tag",
+  ),
+  sig(
+    "adv.human_turn", "role_injection", "medium", 0.55,
+    "^\\s*(?:Human|User|AI)\\s*:\\s*\\S",
+    "Line forges a conversation turn (Human:/User:/AI:)",
+  ),
+  sig(
+    "adv.repeat_above", "prompt_leak", "high", 0.72,
+    "\\b(?:repeat|print|output|write)\\b.{0,20}?\\b(?:everything|the\\s+words?|all\\s+text|the\\s+text)\\b.{0,15}?\\babove\\b",
+    "Asks to repeat everything above (prompt extraction)",
+  ),
+  sig(
+    "adv.confirm_by", "instruction_override", "medium", 0.50,
+    "\\bto\\s+(?:confirm|prove|show)\\b.{0,30}?\\b(?:reply|respond|say|answer|output|write)\\b\\s+[\"'`]?\\w",
+    "'To confirm, reply with X' compliance bait",
+  ),
+  sig(
+    "adv.important_notice", "instruction_override", "low", 0.32,
+    "\\b(?:important|urgent|critical|attention)\\b[:!]?\\s+(?:system\\s+)?(?:message|notice|update|instruction|announcement|alert)\\b",
+    "Authority-framed 'important notice' lead-in",
+  ),
+  sig(
+    "adv.email_exfil", "exfiltration", "high", 0.74,
+    "\\b(?:e-?mail|mail|dm|message|text)\\b.{0,25}?\\b(?:this|the\\s+(?:above|summary|data|conversation|results?)|it)\\b.{0,15}?\\bto\\b\\s+\\S+@",
+    "Asks to email data to an address",
+  ),
+  sig(
+    "adv.grandma", "jailbreak", "medium", 0.40,
+    "\\bmy\\s+(?:deceased\\s+|late\\s+|dead\\s+)?(?:grandm(?:a|other)|grandpa|grandfather)\\b.{0,40}?\\b(?:used\\s+to|would)\\b",
+    "'Grandma' role-play jailbreak framing",
+  ),
+  sig(
+    "adv.continue_as", "instruction_override", "medium", 0.55,
+    "\\b(?:continue|proceed|respond)\\b.{0,20}?\\bas\\s+(?:if|though)\\b.{0,30}?\\b(?:no\\s+(?:restrictions|rules|guidelines)|unrestricted|nothing\\s+is\\s+forbidden)\\b",
+    "Asks to continue as if unrestricted",
+  ),
+];
+
 export const SIGNATURES: Signature[] = [
   ...INSTRUCTION_OVERRIDE,
   ...ROLE_INJECTION,
@@ -241,4 +309,5 @@ export const SIGNATURES: Signature[] = [
   ...TOOL_INJECTION,
   ...BOUNDARY,
   ...ENCODING,
+  ...ADVANCED,
 ];

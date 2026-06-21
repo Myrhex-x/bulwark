@@ -19,19 +19,20 @@ canonicalize text so detection can't be evaded with look-alikes.
 - For HTML input (auto-detected): removes comments, `<script>`/`<style>`, and
   elements hidden via `display:none` / `visibility:hidden` / `opacity:0` /
   `aria-hidden`, then extracts text and unescapes entities.
-- **NFKC-normalizes** so `ｉｇｎｏｒｅ`, ﬁ-ligatures, etc. fold to canonical form.
+- **NFKC-normalizes** so `ｉｇｎｏｒｅ`, ﬁ-ligatures, etc. fold to canonical form, and
+  `fold_confusables` maps cross-script homoglyphs (Cyrillic/Greek look-alikes) to
+  ASCII for the **detection copy only** — the model-facing text is left intact so
+  legitimate non-Latin content is never corrupted.
+- HTML is parsed with a **stack-based extractor** (stdlib `html.parser` in
+  Python, a tokenizer in TS) that drops nested hidden subtrees correctly.
 - Emits `Finding`s for anything dangerous it removed (e.g. tag-char smuggling is
   itself strong evidence of an attack, weight `0.90`).
-
-> The regex HTML cleaner is a robust, dependency-free *fallback*. For messy
-> real-world HTML, extract text with a real parser (e.g. BeautifulSoup, Readability)
-> and pass that in — sanitize still runs as the last line of defense.
 
 ## Stage 2 — `detect`
 
 **Goal:** quantify how likely the text is an attack.
 
-- Runs a [signature database](../python/src/bulwark/patterns.py) of 35+ regexes
+- Runs a [signature database](../python/src/bulwark/patterns.py) of 49 regexes
   across categories: `instruction_override`, `role_injection`, `prompt_leak`,
   `exfiltration`, `jailbreak`, `tool_injection`, `boundary_breakout`, `encoding`.
 - Adds **structural heuristics** (density of imperative-led lines, second-person
@@ -85,11 +86,18 @@ transforms:
 
 **Goal:** treat the model as possibly-compromised and inspect its reply.
 
+- The reply is **normalized** (invisibles stripped, NFKC) first, so a
+  zero-width-split canary or URL cannot evade the checks.
 - **Canary leak** → the prompt was exfiltrated → **unsafe**, redacted.
 - **Boundary-nonce leak** → confusion/leak → redacted.
-- **Markdown image / link** in output → exfiltration channel → stripped.
+- **Exfiltration** — markdown images/links, HTML `<img>`, autolinks, and raw URLs
+  with a data-bearing query string → stripped.
 - **Compliance tells** at the start of the reply → flagged.
 - Returns a possibly-redacted summary, a `safe` flag, and findings.
+
+> `result.safe` reflects **output** safety. `result.injection_detected` separately
+> reports whether the input was hostile, and `result.status` is one of
+> `SAFE` / `CONTAINED` (attack caught & handled) / `UNSAFE` / `BLOCKED`.
 
 ## Orchestration — `Bulwark`
 

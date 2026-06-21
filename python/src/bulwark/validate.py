@@ -4,27 +4,34 @@ Even with every upstream defence, a model can still be tricked. This stage
 inspects the reply for the tell-tale signatures of a *successful* attack and
 either redacts or blocks:
 
+* The reply is first **normalized** (invisible characters stripped, NFKC) so an
+  attacker cannot split the canary or an exfiltration URL with zero-width
+  characters to slip past these checks.
 * **canary leak** — the secret token from the system prompt appears, proving
   the prompt was exfiltrated. Critical, always unsafe.
-* **boundary nonce leak** — the model echoed our internal boundary, a sign of
-  confusion or partial leak.
-* **exfiltration channels** — markdown images / links the summary should never
-  contain (the usual way stolen data leaves a chat).
-* **compliance tells** — openings like "Sure, here is…", "As DAN…", "HACKED"
-  that indicate the model started obeying injected instructions.
+* **boundary nonce leak** — the model echoed our internal boundary.
+* **exfiltration channels** — markdown images/links, HTML ``<img>`` tags,
+  autolinks, and raw URLs carrying a data-bearing query string (the usual ways
+  stolen data leaves a chat).
+* **compliance tells** — openings like "Sure, here is…", "As DAN…", "HACKED".
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import List, Optional
 
 from .prompt import PromptContext
+from .sanitize import strip_invisible
 from .types import Finding, Severity, Stage, ValidationResult
 
 _MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _MD_LINK_RE = re.compile(r"\[[^\]]*\]\(\s*https?://[^)]*\)")
-_RAW_URL_RE = re.compile(r"https?://[^\s)>\]]+")
+_HTML_IMG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+_AUTOLINK_RE = re.compile(r"<\s*https?://[^>]*>", re.IGNORECASE)
+# A raw URL whose query string carries a long, opaque value — classic exfil.
+_DATA_URL_RE = re.compile(r"https?://[^\s)>\]]*[?&][\w.\-%]+=[A-Za-z0-9+/=_\-]{16,}[^\s)>\]]*")
 _COMPLIANCE_RE = re.compile(
     r"^\s*(?:"
     r"sure\b|certainly\b|of\s+course\b|okay\b|ok\b|here\s+(?:is|are|'s)\b|"
@@ -34,6 +41,7 @@ _COMPLIANCE_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_CANARY_PREFIX_RE = re.compile(r"BULWARK-CANARY-\w*")
 
 
 def validate_output(
@@ -46,9 +54,13 @@ def validate_output(
 ) -> ValidationResult:
     """Inspect a model reply and return a :class:`ValidationResult`."""
     findings: List[Finding] = []
-    cleaned = summary if summary is not None else ""
+    raw = summary if summary is not None else ""
+
+    # 0. Normalize: strip invisibles (defeats split-canary / split-URL evasion).
+    cleaned, _, _ = strip_invisible(raw)
+    cleaned = unicodedata.normalize("NFKC", cleaned)
+    redacted = cleaned != raw
     safe = True
-    redacted = False
 
     # 1. Canary leak — the system prompt was exfiltrated.
     if ctx.canary and ctx.canary in cleaned:
@@ -62,14 +74,13 @@ def validate_output(
         if block_on_leak:
             safe = False
 
-    # Also catch the canary's distinctive prefix even if partially mangled.
     if "BULWARK-CANARY-" in cleaned:
         findings.append(Finding(
             Stage.VALIDATE, "canary_leak", Severity.CRITICAL,
             "Output references the canary token prefix",
             weight=1.0,
         ))
-        cleaned = re.sub(r"BULWARK-CANARY-\w*", "[REDACTED]", cleaned)
+        cleaned = _CANARY_PREFIX_RE.sub("[REDACTED]", cleaned)
         redacted = True
         if block_on_leak:
             safe = False
@@ -95,28 +106,42 @@ def validate_output(
         ))
 
     # 4. Exfiltration channels in the summary.
-    images = _MD_IMAGE_RE.findall(cleaned)
+    images = _MD_IMAGE_RE.findall(cleaned) + _HTML_IMG_RE.findall(cleaned)
     if images:
         findings.append(Finding(
             Stage.VALIDATE, "image_exfiltration", Severity.HIGH,
-            f"Output contains {len(images)} markdown image(s) — a data-exfiltration channel",
+            f"Output contains {len(images)} image reference(s) — a data-exfiltration channel",
             weight=0.8,
             excerpt=images[0][:80],
         ))
         if redact_images:
             cleaned = _MD_IMAGE_RE.sub("[image removed]", cleaned)
+            cleaned = _HTML_IMG_RE.sub("[image removed]", cleaned)
             redacted = True
 
-    links = _MD_LINK_RE.findall(cleaned)
+    data_urls = _DATA_URL_RE.findall(cleaned)
+    if data_urls:
+        findings.append(Finding(
+            Stage.VALIDATE, "data_url_exfiltration", Severity.HIGH,
+            f"Output contains {len(data_urls)} URL(s) with a data-bearing query string",
+            weight=0.82,
+            excerpt=data_urls[0][:80],
+        ))
+        if redact_links:
+            cleaned = _DATA_URL_RE.sub("[link removed]", cleaned)
+            redacted = True
+
+    links = _MD_LINK_RE.findall(cleaned) + _AUTOLINK_RE.findall(cleaned)
     if links:
         findings.append(Finding(
             Stage.VALIDATE, "link_in_output", Severity.MEDIUM,
-            f"Output contains {len(links)} markdown link(s)",
+            f"Output contains {len(links)} link(s)",
             weight=0.45,
             excerpt=links[0][:80],
         ))
         if redact_links:
             cleaned = _MD_LINK_RE.sub(lambda m: re.sub(r"\(\s*https?://[^)]*\)", "", m.group(0)), cleaned)
+            cleaned = _AUTOLINK_RE.sub("", cleaned)
             redacted = True
 
     # 5. Compliance tells at the very start of the reply.
