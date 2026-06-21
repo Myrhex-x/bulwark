@@ -14,13 +14,13 @@ Full docs, threat model, and architecture: https://github.com/Myrhex-x/bulwark
 ## Install
 
 ```bash
-npm install bulwark-ai
+npm install bulwark-guard
 ```
 
 ## Use
 
 ```ts
-import { Bulwark } from "bulwark-ai";
+import { Bulwark } from "bulwark-guard";
 
 const guard = new Bulwark();
 
@@ -37,7 +37,7 @@ console.log(result.report);  // what was caught
 Detection only (no model):
 
 ```ts
-import { scan } from "bulwark-ai";
+import { scan } from "bulwark-guard";
 if (scan(text).injected) {
   // ...
 }
@@ -46,7 +46,7 @@ if (scan(text).injected) {
 ## Presets
 
 ```ts
-import { Bulwark, strictConfig, paranoidConfig } from "bulwark-ai";
+import { Bulwark, strictConfig, paranoidConfig } from "bulwark-guard";
 new Bulwark(strictConfig());    // delimiting + data-marking, blocks on critical
 new Bulwark(paranoidConfig());  // base64 isolation, blocks on high
 ```
