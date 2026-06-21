@@ -16,8 +16,9 @@ content gets summarized — and the attack inside it does not.
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](LICENSE)
 [![Python tests](https://github.com/Myrhex-x/bulwark/actions/workflows/python.yml/badge.svg)](https://github.com/Myrhex-x/bulwark/actions/workflows/python.yml)
 [![TypeScript tests](https://github.com/Myrhex-x/bulwark/actions/workflows/typescript.yml/badge.svg)](https://github.com/Myrhex-x/bulwark/actions/workflows/typescript.yml)
+[![Swift tests](https://github.com/Myrhex-x/bulwark/actions/workflows/swift.yml/badge.svg)](https://github.com/Myrhex-x/bulwark/actions/workflows/swift.yml)
 
-Python · TypeScript · zero required dependencies · works with OpenAI, Anthropic, local models, anything.
+Python · TypeScript · Swift · zero required dependencies · works with OpenAI, Anthropic, local models, anything.
 
 </div>
 
@@ -171,6 +172,29 @@ import { scan } from "bulwark-ai";
 if (scan(text).injected) { /* … */ }
 ```
 
+## Quick start — Swift
+
+Add via Swift Package Manager: `.package(url: "https://github.com/Myrhex-x/bulwark.git", from: "0.2.0")`
+
+```swift
+import Bulwark
+
+let bulwark = Bulwark()
+
+let result = try await bulwark.summarize(untrustedPage) { messages in
+    try await myModel(messages)   // call your model, return the reply string
+}
+
+print(result.summary ?? "[blocked]")   // cleaned, validated summary
+print(result.status)                    // .safe / .contained / .unsafe / .blocked
+print(result.report)
+```
+
+```swift
+import Bulwark
+if scan(text).injected { /* … */ }
+```
+
 ---
 
 ## Security postures
@@ -209,6 +233,10 @@ from bulwark import sanitize_text, scan, spotlight, build_messages, validate_out
 import { sanitize, detect, spotlight, buildMessages, validateOutput } from "bulwark-ai";
 ```
 
+```swift
+import Bulwark  // sanitize, detect, spotlight, buildMessages, validateOutput, scan
+```
+
 Already have your own prompt and model? Use `prepare()` / `finalize()`:
 
 ```python
@@ -239,15 +267,17 @@ a force field. See [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for specifics.
 
 ```
 bulwark/
-├── python/        # pip package `bulwark-ai`  (stdlib-only core)
+├── python/        # pip package `bulwark-ai`   (stdlib-only core)
 ├── typescript/    # npm package `bulwark-ai`   (isomorphic, no deps)
-└── docs/          # threat model + architecture
+├── swift/         # SwiftPM library `Bulwark`  (Foundation only)
+├── Package.swift  # root manifest for the Swift package
+└── docs/          # threat model + architecture + security review
 ```
 
-Both implementations share the **same signature database, scoring, prompts, and
-behaviour**, produce identical verdicts, and each has a full test suite (53
-Python / 52 TypeScript, including a red-team corpus) run in CI. The hardening
-work is documented in [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
+All three implementations share the **same signature database, scoring, prompts,
+and behaviour**, produce identical verdicts, and each has a full test suite (53
+Python / 52 TypeScript / 51 Swift, including a red-team corpus) run in CI. The
+hardening work is documented in [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
 
 ## Contributing
 

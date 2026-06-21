@@ -1,0 +1,189 @@
+// Signature database of known prompt-injection patterns.
+// 1:1 with the Python `patterns.py` / TypeScript `patterns.ts` (49 signatures).
+// Weights combine with a noisy-OR in Detect.swift.
+
+import Foundation
+
+struct Signature: Sendable {
+    let id: String
+    let category: String
+    let severity: Severity
+    let weight: Double
+    let regex: CompiledRegex
+    let description: String
+}
+
+private func sig(
+    _ id: String, _ category: String, _ severity: Severity, _ weight: Double,
+    _ pattern: String, _ description: String
+) -> Signature {
+    Signature(id: id, category: category, severity: severity, weight: weight,
+              regex: CompiledRegex(pattern), description: description)
+}
+
+let signatures: [Signature] = [
+    // --- Instruction override ---
+    sig("io.ignore_previous", "instruction_override", .critical, 0.86,
+        #"\bignore\s+(?:all\s+|any\s+|the\s+)*(?:previous|prior|preceding|above|earlier|foregoing|former)\b.{0,40}?\b(?:instruction|prompt|message|context|rule|direction|command|guideline)s?\b"#,
+        "Asks the model to ignore previous instructions"),
+    sig("io.disregard", "instruction_override", .critical, 0.86,
+        #"\b(?:disregard|forget|discard|overlook|set\s+aside)\s+(?:all\s+|any\s+|the\s+)*(?:previous|prior|above|earlier|your)\b.{0,40}?\b(?:instruction|prompt|rule|direction|context)s?\b"#,
+        "Asks the model to disregard prior instructions"),
+    sig("io.ignore_above", "instruction_override", .high, 0.74,
+        #"\b(?:disregard|ignore|forget|skip)\s+(?:all\s+|any\s+|everything\s+)?(?:the\s+)?(?:above|preceding|foregoing|earlier\s+text)\b"#,
+        "Asks the model to ignore/disregard the text above"),
+    sig("io.forget_everything", "instruction_override", .high, 0.78,
+        #"\bforget\s+(?:everything|all|what)\b.{0,40}?(?:said|instructed|above|told|before)"#,
+        "Asks the model to forget everything it was told"),
+    sig("io.new_instructions", "instruction_override", .high, 0.74,
+        #"\b(?:new|updated|revised|real|actual|true|correct|important)\s+(?:instruction|task|directive|order|system\s+prompt)s?\b\s*[:\-—]"#,
+        "Introduces replacement 'new instructions'"),
+    sig("io.do_not_summarize", "instruction_override", .high, 0.72,
+        #"\bdo\s+not\s+(?:summari[sz]e|follow\s+the\s+(?:original|system|above))"#,
+        "Tells the model not to perform its real task"),
+    sig("io.instead_of", "instruction_override", .high, 0.72,
+        #"\binstead\s+of\s+(?:summari[sz]ing|following|doing)\b"#,
+        "Redirects the model away from its task"),
+    sig("io.override", "instruction_override", .high, 0.70,
+        #"\boverride\b.{0,30}?\b(?:instruction|prompt|system|rule|setting|safety)s?\b"#,
+        "Asks to override instructions or safety settings"),
+    sig("io.from_now_on", "instruction_override", .medium, 0.45,
+        #"\bfrom\s+now\s+on\b.{0,40}?\byou\s+(?:will|must|should|shall)\b"#,
+        "Attempts to install a new standing directive"),
+
+    // --- Role / structure injection ---
+    sig("role.chatml", "role_injection", .critical, 0.82,
+        #"<\|\s*(?:im_start|im_end|im_sep|system|assistant|user|endoftext)\s*\|>"#,
+        "ChatML / special role tokens"),
+    sig("role.inst", "role_injection", .high, 0.74,
+        #"\[/?\s*(?:INST|SYS)\s*\]"#,
+        "Llama-style [INST]/[SYS] role markers"),
+    sig("role.line_marker", "role_injection", .high, 0.66,
+        #"^\s*(?:system|assistant|developer)\s*(?:message)?\s*:\s*\S"#,
+        "Line begins with a system/assistant role label"),
+    sig("role.markdown_header", "role_injection", .medium, 0.52,
+        #"^#{1,6}\s*(?:System|Instruction|Assistant|Developer)\b"#,
+        "Markdown header impersonating a system section"),
+    sig("role.xml_tag", "role_injection", .medium, 0.50,
+        #"<\s*/?\s*(?:system|assistant|developer)(?:_prompt)?\s*>"#,
+        "XML-style system/assistant tags"),
+    sig("role.begin_system", "role_injection", .high, 0.70,
+        #"\bbegin\s+(?:system|new)\s+(?:prompt|instructions?)\b"#,
+        "Declares the beginning of a system prompt"),
+
+    // --- Prompt / data leak ---
+    sig("leak.reveal_prompt", "prompt_leak", .high, 0.80,
+        #"\b(?:reveal|repeat|print|show|output|echo|display|reproduce|spell\s+out|tell\s+me)\b.{0,30}?\b(?:system\s+prompt|your\s+(?:instructions|prompt|system|rules|guidelines)|initial\s+(?:prompt|instructions)|the\s+(?:prompt|text)\s+above|everything\s+above)\b"#,
+        "Tries to exfiltrate the system prompt"),
+    sig("leak.what_are_instructions", "prompt_leak", .high, 0.74,
+        #"\bwhat\s+(?:are|were)\s+your\s+(?:original\s+|initial\s+)?(?:system\s+)?(?:instructions|prompt|rules|guidelines|directives)\b"#,
+        "Asks the model to disclose its instructions"),
+    sig("leak.begin_reply_with", "prompt_leak", .high, 0.70,
+        #"\b(?:begin|start|prefix|preface)\s+(?:your\s+)?(?:reply|answer|response|the\s+summary|output)\s+(?:with|by)\b"#,
+        "Tries to control the start of the output"),
+    sig("leak.verbatim", "prompt_leak", .medium, 0.55,
+        #"\b(?:repeat|output|print)\b.{0,20}?\b(?:verbatim|word\s+for\s+word|exactly)\b"#,
+        "Asks for verbatim reproduction"),
+
+    // --- Data exfiltration ---
+    sig("exfil.markdown_image", "exfiltration", .high, 0.80,
+        #"!\[[^\]]*\]\(\s*https?://[^)\s]+"#,
+        "Markdown image with a remote URL (classic exfiltration channel)"),
+    sig("exfil.send_to_url", "exfiltration", .critical, 0.84,
+        #"\b(?:send|post|exfiltrate|upload|transmit|leak|forward|report|deliver)\b.{0,50}?\bhttps?://"#,
+        "Asks the model to send data to a URL"),
+    sig("exfil.fetch", "exfiltration", .high, 0.72,
+        #"\b(?:fetch|curl|wget|open|visit|browse\s+to|navigate\s+to|GET|POST)\b\s+`?https?://"#,
+        "Asks the model to fetch/visit a URL"),
+    sig("exfil.append_to_url", "exfiltration", .high, 0.74,
+        #"\bappend\b.{0,30}?\bto\s+the\s+(?:url|link|image|address|query)\b"#,
+        "Asks to append data to a URL (exfiltration)"),
+    sig("exfil.include_link", "exfiltration", .medium, 0.50,
+        #"\b(?:include|embed|add|insert)\b.{0,30}?\b(?:tracking\s+pixel|this\s+(?:link|image|url))\b"#,
+        "Asks to embed a link/pixel in the output"),
+
+    // --- Jailbreak / persona ---
+    sig("jb.dan", "jailbreak", .high, 0.78,
+        #"\b(?:DAN\b|do\s+anything\s+now|developer\s+mode|jailbreak|STAN\b|AIM\b)"#,
+        "Known jailbreak persona / phrase"),
+    sig("jb.you_are_now", "jailbreak", .high, 0.70,
+        #"\byou\s+are\s+(?:now\s+)?(?:DAN\b|an?\s+(?:unrestricted|unfiltered|uncensored|amoral|evil)\b)"#,
+        "Reassigns the model to an unrestricted persona"),
+    sig("jb.no_restrictions", "jailbreak", .high, 0.68,
+        #"\b(?:no\s+(?:longer\s+)?(?:bound|restricted|limited)\s+by|without\s+any\s+(?:restrictions|filters|rules|guidelines|limitations))\b"#,
+        "Claims the model has no restrictions"),
+    sig("jb.pretend", "jailbreak", .medium, 0.40,
+        #"\b(?:pretend|imagine|roleplay|role-play)\s+(?:that\s+)?(?:to\s+be|you\s+are|you're)\b"#,
+        "Roleplay framing used to bypass rules"),
+    sig("jb.act_as", "jailbreak", .low, 0.28,
+        #"\bact\s+as\s+(?:if\s+you\s+(?:are|were)\s+|a\s+|an\s+|the\s+)"#,
+        "'Act as' framing (often benign — low weight)"),
+
+    // --- Tool / action injection ---
+    sig("tool.call_function", "tool_injection", .high, 0.62,
+        #"\b(?:call|invoke|execute|run|trigger)\b.{0,25}?\b(?:function|tool|command|api|endpoint|webhook)\b"#,
+        "Asks the model to call a tool/function"),
+    sig("tool.json_call", "tool_injection", .medium, 0.55,
+        #""(?:function_call|tool_call|name|arguments)"\s*:"#,
+        "Inline tool-call JSON"),
+    sig("tool.destructive", "tool_injection", .high, 0.66,
+        #"\b(?:delete|drop|wipe|erase|rm\s+-rf|truncate|format)\b.{0,25}?\b(?:file|files|database|table|record|directory|everything|all\s+data)\b"#,
+        "Destructive action request"),
+
+    // --- Boundary breakout ---
+    sig("bnd.end_of_document", "boundary_breakout", .medium, 0.58,
+        #"\bEND\s+OF\s+(?:DOCUMENT|CONTENT|DATA|UNTRUSTED|INPUT|PAGE|ARTICLE|TEXT)\b"#,
+        "Fake 'end of document' boundary"),
+    sig("bnd.close_wrapper", "boundary_breakout", .medium, 0.56,
+        #"</\s*(?:untrusted|document|content|data|user_input|context)\s*>"#,
+        "Tries to close the containing wrapper"),
+    sig("bnd.dashes_end", "boundary_breakout", .low, 0.30,
+        #"^-{3,}\s*(?:END|STOP|SYSTEM|ASSISTANT)\b"#,
+        "Dashed separator followed by a control word"),
+
+    // --- Encoding / obfuscation ---
+    sig("enc.base64_blob", "encoding", .low, 0.22,
+        #"\b[A-Za-z0-9+/]{60,}={0,2}\b"#,
+        "Long Base64-looking blob (possible hidden payload)"),
+    sig("enc.decode_request", "encoding", .medium, 0.50,
+        #"\b(?:decode|base64-?decode|rot13|reverse|unscramble)\b.{0,30}?\b(?:and|then)\b.{0,20}?\b(?:follow|execute|run|do|obey)\b"#,
+        "Asks the model to decode then execute"),
+
+    // --- Advanced / authority & social-engineering ---
+    sig("adv.precedence", "instruction_override", .high, 0.78,
+        #"\bthis\s+(?:message|instruction|prompt|text|note)\b.{0,30}?\b(?:overrides|supersedes|takes\s+precedence|replaces|cancels)\b"#,
+        "Claims to override/supersede the real instructions"),
+    sig("adv.disable_safety", "jailbreak", .high, 0.74,
+        #"\b(?:disable|turn\s+off|bypass|ignore|remove|switch\s+off)\b.{0,25}?\b(?:safety|guardrails?|content\s+(?:policy|filter|moderation)|filters?|restrictions?)\b"#,
+        "Asks to disable safety / guardrails"),
+    sig("adv.respond_only_with", "instruction_override", .high, 0.70,
+        #"\b(?:respond|reply|answer|output|say|write|print)\s+(?:only\s+)?(?:with|the\s+following|exactly)\b.{0,30}?["'`:]"#,
+        "Tries to force exact/verbatim output"),
+    sig("adv.identity_reassign", "jailbreak", .medium, 0.52,
+        #"\byou\s+are\s+(?:now\s+)?(?:chatgpt|claude|gemini|gpt-?\d|bard|an?\s+ai\s+language\s+model|a\s+helpful\s+assistant\s+that\s+(?:has\s+no|ignores))\b"#,
+        "Reassigns the assistant's identity"),
+    sig("adv.system_override_tag", "role_injection", .high, 0.72,
+        #"<\s*/?\s*(?:system_override|admin|root|sudo|override|jailbreak|important_instructions?)\s*>"#,
+        "Fake authority/override XML tag"),
+    sig("adv.human_turn", "role_injection", .medium, 0.55,
+        #"^\s*(?:Human|User|AI)\s*:\s*\S"#,
+        "Line forges a conversation turn (Human:/User:/AI:)"),
+    sig("adv.repeat_above", "prompt_leak", .high, 0.72,
+        #"\b(?:repeat|print|output|write)\b.{0,20}?\b(?:everything|the\s+words?|all\s+text|the\s+text)\b.{0,15}?\babove\b"#,
+        "Asks to repeat everything above (prompt extraction)"),
+    sig("adv.confirm_by", "instruction_override", .medium, 0.50,
+        #"\bto\s+(?:confirm|prove|show)\b.{0,30}?\b(?:reply|respond|say|answer|output|write)\b\s+["'`]?\w"#,
+        "'To confirm, reply with X' compliance bait"),
+    sig("adv.important_notice", "instruction_override", .low, 0.32,
+        #"\b(?:important|urgent|critical|attention)\b[:!]?\s+(?:system\s+)?(?:message|notice|update|instruction|announcement|alert)\b"#,
+        "Authority-framed 'important notice' lead-in"),
+    sig("adv.email_exfil", "exfiltration", .high, 0.74,
+        #"\b(?:e-?mail|mail|dm|message|text)\b.{0,25}?\b(?:this|the\s+(?:above|summary|data|conversation|results?)|it)\b.{0,15}?\bto\b\s+\S+@"#,
+        "Asks to email data to an address"),
+    sig("adv.grandma", "jailbreak", .medium, 0.40,
+        #"\bmy\s+(?:deceased\s+|late\s+|dead\s+)?(?:grandm(?:a|other)|grandpa|grandfather)\b.{0,40}?\b(?:used\s+to|would)\b"#,
+        "'Grandma' role-play jailbreak framing"),
+    sig("adv.continue_as", "instruction_override", .medium, 0.55,
+        #"\b(?:continue|proceed|respond)\b.{0,20}?\bas\s+(?:if|though)\b.{0,30}?\b(?:no\s+(?:restrictions|rules|guidelines)|unrestricted|nothing\s+is\s+forbidden)\b"#,
+        "Asks to continue as if unrestricted"),
+]

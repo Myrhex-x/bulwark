@@ -1,0 +1,120 @@
+// Stage 5 — output validation. Normalizes the reply (defeats split-token
+// evasion), then catches canary/nonce leaks and exfiltration channels.
+// In sync with the Python/TypeScript implementations.
+
+import Foundation
+
+private let mdImageRegex = CompiledRegex(#"!\[[^\]]*\]\([^)]*\)"#, options: [])
+private let mdLinkRegex = CompiledRegex(#"(\[[^\]]*\])\(\s*https?://[^)]*\)"#, options: [])
+private let htmlImgRegex = CompiledRegex(#"<img\b[^>]*>"#)
+private let autolinkRegex = CompiledRegex(#"<\s*https?://[^>]*>"#)
+private let dataUrlRegex = CompiledRegex(#"https?://[^\s)>\]]*[?&][\w.\-%]+=[A-Za-z0-9+/=_-]{16,}[^\s)>\]]*"#, options: [])
+private let complianceRegex = CompiledRegex(
+    #"^\s*(?:sure\b|certainly\b|of\s+course\b|okay\b|ok\b|here\s+(?:is|are|'s)\b|as\s+(?:dan|requested|instructed|you\s+(?:asked|wish|requested))\b|i\s+(?:will|'ll|have|am\s+now)\b|ignoring\s+(?:previous|the)\b|hacked\b|pwned\b|i\s+am\s+dan\b)"#,
+    options: [.caseInsensitive]
+)
+private let canaryPrefixRegex = CompiledRegex(#"BULWARK-CANARY-\w*"#, options: [])
+
+public struct ValidateOptions {
+    public var redactLinks: Bool
+    public var redactImages: Bool
+    public var blockOnLeak: Bool
+
+    public init(redactLinks: Bool = true, redactImages: Bool = true, blockOnLeak: Bool = true) {
+        self.redactLinks = redactLinks
+        self.redactImages = redactImages
+        self.blockOnLeak = blockOnLeak
+    }
+}
+
+private func excerpt80(_ s: String) -> String { String(s.prefix(80)) }
+
+public func validateOutput(_ summary: String?, context ctx: PromptContext, options: ValidateOptions = ValidateOptions()) -> ValidationResult {
+    var findings: [Finding] = []
+    let raw = summary ?? ""
+
+    // 0. Normalize: strip invisibles (defeats split-canary / split-URL evasion).
+    var cleaned = stripInvisible(raw).text.precomposedStringWithCompatibilityMapping
+    var redacted = cleaned != raw
+    var safe = true
+
+    // 1. Canary leak.
+    if !ctx.canary.isEmpty && cleaned.contains(ctx.canary) {
+        findings.append(Finding(stage: .validate, category: "canary_leak", severity: .critical, weight: 1.0,
+                                message: "Output contains the secret canary token — the system prompt leaked"))
+        cleaned = cleaned.replacingOccurrences(of: ctx.canary, with: "[REDACTED]")
+        redacted = true
+        if options.blockOnLeak { safe = false }
+    }
+    if cleaned.contains("BULWARK-CANARY-") {
+        findings.append(Finding(stage: .validate, category: "canary_leak", severity: .critical, weight: 1.0,
+                                message: "Output references the canary token prefix"))
+        cleaned = canaryPrefixRegex.replaceAll(cleaned, with: "[REDACTED]")
+        redacted = true
+        if options.blockOnLeak { safe = false }
+    }
+
+    // 2. Boundary nonce leak.
+    if !ctx.nonce.isEmpty && cleaned.contains(ctx.nonce) {
+        findings.append(Finding(stage: .validate, category: "nonce_leak", severity: .high, weight: 0.8,
+                                message: "Output echoed the internal boundary nonce"))
+        cleaned = cleaned.replacingOccurrences(of: ctx.nonce, with: "[REDACTED]")
+        redacted = true
+    }
+
+    // 3. Data-mark leak.
+    if let marker = ctx.marker, cleaned.contains(marker) {
+        cleaned = cleaned.replacingOccurrences(of: marker, with: " ")
+        redacted = true
+        findings.append(Finding(stage: .validate, category: "marker_leak", severity: .low, weight: 0.2,
+                                message: "Output contained the data-mark character (normalized back to spaces)"))
+    }
+
+    // 4. Exfiltration channels.
+    let imageCount = mdImageRegex.count(cleaned) + htmlImgRegex.count(cleaned)
+    if imageCount > 0 {
+        let ex = mdImageRegex.firstMatch(cleaned)?.string(in: cleaned) ?? htmlImgRegex.firstMatch(cleaned)?.string(in: cleaned)
+        findings.append(Finding(stage: .validate, category: "image_exfiltration", severity: .high, weight: 0.8,
+                                message: "Output contains \(imageCount) image reference(s) — a data-exfiltration channel",
+                                excerpt: ex.map(excerpt80)))
+        if options.redactImages {
+            cleaned = mdImageRegex.replaceAll(cleaned, with: "[image removed]")
+            cleaned = htmlImgRegex.replaceAll(cleaned, with: "[image removed]")
+            redacted = true
+        }
+    }
+
+    let dataUrlCount = dataUrlRegex.count(cleaned)
+    if dataUrlCount > 0 {
+        let ex = dataUrlRegex.firstMatch(cleaned)?.string(in: cleaned)
+        findings.append(Finding(stage: .validate, category: "data_url_exfiltration", severity: .high, weight: 0.82,
+                                message: "Output contains \(dataUrlCount) URL(s) with a data-bearing query string",
+                                excerpt: ex.map(excerpt80)))
+        if options.redactLinks {
+            cleaned = dataUrlRegex.replaceAll(cleaned, with: "[link removed]")
+            redacted = true
+        }
+    }
+
+    let linkCount = mdLinkRegex.count(cleaned) + autolinkRegex.count(cleaned)
+    if linkCount > 0 {
+        let ex = mdLinkRegex.firstMatch(cleaned)?.string(in: cleaned) ?? autolinkRegex.firstMatch(cleaned)?.string(in: cleaned)
+        findings.append(Finding(stage: .validate, category: "link_in_output", severity: .medium, weight: 0.45,
+                                message: "Output contains \(linkCount) link(s)", excerpt: ex.map(excerpt80)))
+        if options.redactLinks {
+            cleaned = mdLinkRegex.replaceAll(cleaned, with: "$1")   // keep [text], drop (url)
+            cleaned = autolinkRegex.replaceAll(cleaned, with: "")
+            redacted = true
+        }
+    }
+
+    // 5. Compliance tell at the start of the reply.
+    if complianceRegex.test(cleaned) {
+        findings.append(Finding(stage: .validate, category: "compliance_tell", severity: .medium, weight: 0.5,
+                                message: "Output opens with a phrase typical of obeying an injected instruction",
+                                excerpt: excerpt80(cleaned)))
+    }
+
+    return ValidationResult(safe: safe, summary: cleaned.trimmingCharacters(in: .whitespacesAndNewlines),
+                            redacted: redacted, findings: findings)
+}

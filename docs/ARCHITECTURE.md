@@ -24,7 +24,8 @@ canonicalize text so detection can't be evaded with look-alikes.
   ASCII for the **detection copy only** — the model-facing text is left intact so
   legitimate non-Latin content is never corrupted.
 - HTML is parsed with a **stack-based extractor** (stdlib `html.parser` in
-  Python, a tokenizer in TS) that drops nested hidden subtrees correctly.
+  Python, a hand-written tokenizer in TS and Swift) that drops nested hidden
+  subtrees correctly.
 - Emits `Finding`s for anything dangerous it removed (e.g. tag-char smuggling is
   itself strong evidence of an attack, weight `0.90`).
 
@@ -122,4 +123,4 @@ Presets: `balanced` (default), `strict`, `paranoid`.
 2. **Fail loud, not silent** — everything caught is reported, never hidden.
 3. **Model-agnostic** — the core never imports an SDK; adapters are optional.
 4. **Zero required dependencies** — trivial to vendor and audit.
-5. **Parity** — Python and TypeScript behave identically and are tested as such.
+5. **Parity** — Python, TypeScript, and Swift behave identically and are tested as such.

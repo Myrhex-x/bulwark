@@ -89,5 +89,6 @@ on 15 benign texts, so future changes can't silently regress either direction.
 ```
 cd python && python run_tests.py     # 53 passed
 cd typescript && npm test            # 52 passed
+swift test                           # 51 passed   (from repo root)
 ```
-Both engines produce identical verdicts on the parity corpus.
+All three engines produce identical verdicts on the parity corpus.

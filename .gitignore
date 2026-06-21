@@ -21,6 +21,12 @@ npm-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Swift
+.build/
+.swiftpm/
+*.xcodeproj
+Package.resolved
+
 # Editors / OS
 .DS_Store
 .idea/

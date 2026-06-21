@@ -6,10 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.0] — 2026-06-21
 
-Security-review hardening. See [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md).
-Python and TypeScript remain at parity (53 / 52 tests).
+Security-review hardening + a **Swift** implementation. See
+[docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md). All three languages are at
+parity (53 Python / 52 TypeScript / 51 Swift tests, identical verdicts).
 
 ### Added
+- **Swift package** (`Bulwark`, SwiftPM, Foundation-only) — full five-layer
+  pipeline mirroring Python/TypeScript, with an async `summarize` API.
 - **Cross-script homoglyph folding** (`fold_confusables`): Cyrillic/Greek
   look-alikes are mapped to ASCII for the detection copy, so disguises like
   `іgnоrе аll рrеvіоus іnstruсtіоns` are caught. Model-facing text is untouched.
