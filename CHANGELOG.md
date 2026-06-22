@@ -25,6 +25,12 @@ Evasion-resistance and coverage release. All three languages at parity (71 Pytho
   redacts reference-style markdown definitions (`[id]: https://…`), not just
   inline `[text](url)` links.
 
+### Changed
+- Dev tooling: upgraded the TypeScript test runner to `vitest@4` (clears all
+  transitive `esbuild`/`vite` advisories) and moved the CI matrix to Node
+  20/22/24 (Node 18 is end-of-life). The published package remains
+  zero-dependency; the library's `engines.node` is unchanged at `>=18`.
+
 ## [0.3.0] — 
 
 Second security review. All three languages at parity (59 Python / 58 TypeScript
