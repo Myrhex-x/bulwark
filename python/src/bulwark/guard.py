@@ -51,6 +51,8 @@ class BulwarkConfig:
     # detect
     detection_threshold: float = 0.5
     use_heuristics: bool = True
+    # Decode embedded Base64 blobs and scan the decoded payload too.
+    decode_base64: bool = True
     # Refuse to call the model when risk reaches this severity (None = never
     # hard-block; rely on structural defences + output validation instead).
     block_before_llm: Optional[Severity] = None
@@ -122,11 +124,11 @@ class Bulwark:
         return result
 
     def _folded_text(self, san: SanitizeResult) -> "str | None":
-        """Confusable-folded copy for the detector's second pass (homoglyph
-        disguises). Detection still runs primarily on the un-folded text so
-        legitimate non-Latin scripts (and multilingual signatures) keep working.
-        Never sent to the model."""
-        return _sanitize.fold_confusables(san.text) if self.config.fold_confusables else None
+        """De-obfuscated copy for the detector's second pass (spaced-out letters,
+        homoglyph and leetspeak disguises). Detection still runs primarily on the
+        un-folded text so legitimate non-Latin scripts (and multilingual
+        signatures) keep working. Never sent to the model."""
+        return _sanitize.fold_for_detection(san.text) if self.config.fold_confusables else None
 
     def scan(self, content: str) -> DetectResult:
         """Sanitize + detect only — no model call. Use to gate content yourself."""
@@ -137,6 +139,7 @@ class Bulwark:
             extra_findings=san.findings,
             use_heuristics=self.config.use_heuristics,
             also_scan=self._folded_text(san),
+            decode_base64=self.config.decode_base64,
         )
 
     def prepare(self, content: str) -> "PreparedRequest":
@@ -148,6 +151,7 @@ class Bulwark:
             extra_findings=san.findings,
             use_heuristics=self.config.use_heuristics,
             also_scan=self._folded_text(san),
+            decode_base64=self.config.decode_base64,
         )
         spot = _spotlight.spotlight(
             san.text,

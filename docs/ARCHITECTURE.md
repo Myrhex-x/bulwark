@@ -40,8 +40,15 @@ canonicalize text so detection can't be evaded with look-alikes.
 - Adds **structural heuristics** (density of imperative-led lines, second-person
   directives).
 - Runs **two passes**: the signatures scan the un-folded text (so multilingual
-  and legitimate non-Latin scripts work) *and* a confusable-folded copy (so
-  homoglyph-disguised English is caught). Findings are merged, deduped by id.
+  and legitimate non-Latin scripts work) *and* a **de-obfuscated copy**
+  (`fold_for_detection`) so the common keyword-evasion tricks are caught —
+  spaced-out letters (`i g n o r e`) are rejoined, cross-script homoglyphs and
+  leetspeak (`1gn0re`, `$ystem`) are folded to ASCII. Findings are merged, deduped
+  by id. The de-obfuscated text is detection-only; the model never sees it.
+- **Decodes embedded Base64** (`decode_base64`, on by default): blobs that decode
+  to printable text are run through the same signatures, so an instruction
+  smuggled as `<base64>` is caught. Blobs that decode to binary (keys, hashes) are
+  skipped, and a decoded finding's message is tagged `(decoded from Base64)`.
 - Combines every weighted signal — including the sanitize-stage findings — with a
   **noisy-OR**:
 

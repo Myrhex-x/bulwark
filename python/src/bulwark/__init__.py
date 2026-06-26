@@ -25,7 +25,12 @@ from __future__ import annotations
 from .detect import bucket, scan as _scan, score_findings
 from .guard import Bulwark, BulwarkConfig, PreparedRequest
 from .prompt import PromptContext, build_messages
-from .sanitize import fold_confusables
+from .sanitize import (
+    collapse_spaced_letters,
+    fold_confusables,
+    fold_for_detection,
+    fold_leet,
+)
 from .sanitize import sanitize as sanitize_text
 from .spotlight import spotlight
 from .types import (
@@ -40,7 +45,7 @@ from .types import (
 )
 from .validate import validate_output
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "Bulwark",
@@ -49,6 +54,9 @@ __all__ = [
     "scan",
     "sanitize_text",
     "fold_confusables",
+    "fold_leet",
+    "collapse_spaced_letters",
+    "fold_for_detection",
     "spotlight",
     "build_messages",
     "validate_output",
@@ -70,13 +78,14 @@ __all__ = [
 def scan(text: str, *, threshold: float = 0.5) -> DetectResult:
     """Sanitize then detect injection in ``text`` — convenience wrapper, no model call.
 
-    Detection runs on a confusable-folded copy so cross-script homoglyph
-    disguises (e.g. Cyrillic look-alikes) are caught.
+    Detection runs on a de-obfuscated copy (spaced-out letters joined, cross-script
+    homoglyphs and leetspeak folded) and decodes embedded Base64 payloads, so the
+    common keyword-evasion tricks are caught.
     """
     result = sanitize_text(text)
     return _scan(
         result.text,
         threshold=threshold,
         extra_findings=result.findings,
-        also_scan=fold_confusables(result.text),
+        also_scan=fold_for_detection(result.text),
     )

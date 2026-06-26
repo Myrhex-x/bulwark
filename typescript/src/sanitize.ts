@@ -41,6 +41,38 @@ export function foldConfusables(text: string): string {
   return out;
 }
 
+// Leetspeak: digits/symbols standing in for letters (1gn0re, pr0mpt, $ystem).
+// Folded on the detection copy only. We only rewrite a run that already contains
+// a letter, so "2024" or "$5" are left alone while "h4x0r" becomes "haxor".
+const LEET: Record<string, string> = { "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s" };
+const LEET_TOKEN_RE = /[0-9@$]*[A-Za-z][0-9A-Za-z@$]*/g;
+// A trigger word smeared across single, separator-spaced characters
+// ("i g n o r e", "i.g.n.o.r.e"). Anchored so it never swallows a letter from
+// the next word, and ≥4 chars long so short acronyms ("U.S.A") survive.
+const SPACED_RE = /\b(?:[0-9A-Za-z][ \t._\-*]){3,}[0-9A-Za-z]\b/g;
+const SEP_RE = /[ \t._\-*]/g;
+
+/** Fold common leetspeak substitutions to letters within word-like tokens.
+ * Detection-only; never shown to the model. */
+export function foldLeet(text: string): string {
+  return text.replace(LEET_TOKEN_RE, (tok) => tok.replace(/[0-9@$]/g, (c) => LEET[c] ?? c));
+}
+
+/** Join trigger words split into single, separator-spaced characters.
+ * Detection-only; never shown to the model. */
+export function collapseSpacedLetters(text: string): string {
+  return text.replace(SPACED_RE, (run) => run.replace(SEP_RE, ""));
+}
+
+/** Build the de-obfuscated copy the detector scans alongside the original:
+ * spaced-out letters joined, then homoglyphs and leetspeak folded (in that
+ * order, so e.g. `1 g n 0 r e` resolves to `ignore`). The model never sees this;
+ * it lets detection see through the disguise while the original copy keeps
+ * legitimate non-Latin scripts and numbers intact. */
+export function foldForDetection(text: string): string {
+  return foldLeet(foldConfusables(collapseSpacedLetters(text)));
+}
+
 const HIDDEN_STYLE_RE = /display\s*:\s*none|visibility\s*:\s*hidden|opacity\s*:\s*0|font-size\s*:\s*0(?:px|em|rem|%)?\b/i;
 const HIDDEN_ATTR_RE = /(?:^|\s)hidden(?=[\s=>]|$)/i;
 const ARIA_HIDDEN_RE = /aria-hidden\s*=\s*["']?true/i;

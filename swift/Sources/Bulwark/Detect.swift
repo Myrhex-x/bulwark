@@ -59,6 +59,31 @@ public func heuristicFindings(_ text: String) -> [Finding] {
     return findings
 }
 
+private let b64PayloadRegex = CompiledRegex(#"[A-Za-z0-9+/]{24,}={0,2}"#, options: [])
+
+/// Return the decoded text of embedded Base64 blobs that resolve to printable
+/// UTF-8. A common evasion is to Base64-encode an instruction so it sails past
+/// every keyword signature; decoding it here lets the same signatures run on the
+/// real payload. Blobs that aren't valid Base64 or decode to mostly binary are
+/// skipped, so random tokens and hashes don't generate noise.
+public func decodeBase64Payloads(_ text: String, maxPayloads: Int = 12) -> [String] {
+    var payloads: [String] = []
+    for m in b64PayloadRegex.allMatches(text) {
+        let blob0 = m.string(in: text)
+        let usable = blob0.count - (blob0.count % 4)
+        if usable < 24 { continue }
+        let blob = String(blob0.prefix(usable))
+        guard let data = Data(base64Encoded: blob), let decoded = String(data: data, encoding: .utf8) else { continue }
+        if decoded.trimmingCharacters(in: .whitespacesAndNewlines).count < 4 { continue }
+        let scalars = decoded.unicodeScalars
+        let printable = scalars.filter { $0.value >= 0x20 || $0 == "\t" || $0 == "\n" || $0 == "\r" }.count
+        if Double(printable) / Double(scalars.count) < 0.85 { continue }
+        payloads.append(decoded)
+        if payloads.count >= maxPayloads { break }
+    }
+    return payloads
+}
+
 public func scoreFindings<S: Sequence>(_ findings: S) -> Double where S.Element == Finding {
     var product = 1.0
     for f in findings {
@@ -81,27 +106,43 @@ public struct DetectOptions {
     public var extraFindings: [Finding]
     public var useHeuristics: Bool
     /// Additional copy of the text scanned with the same signatures, merged
-    /// (used for the confusable-folded copy so homoglyph disguises are caught
-    /// without breaking detection of legitimate non-Latin scripts).
+    /// (used for the de-obfuscated copy so homoglyph/leetspeak disguises are
+    /// caught without breaking detection of legitimate non-Latin scripts).
     public var alsoScan: String?
+    /// Decode embedded Base64 blobs and scan the decoded payload too.
+    public var decodeBase64: Bool
 
-    public init(threshold: Double = 0.5, extraFindings: [Finding] = [], useHeuristics: Bool = true, alsoScan: String? = nil) {
+    public init(threshold: Double = 0.5, extraFindings: [Finding] = [], useHeuristics: Bool = true, alsoScan: String? = nil, decodeBase64: Bool = true) {
         self.threshold = threshold
         self.extraFindings = extraFindings
         self.useHeuristics = useHeuristics
         self.alsoScan = alsoScan
+        self.decodeBase64 = decodeBase64
     }
 }
 
 public func detect(_ text: String, options: DetectOptions = DetectOptions()) -> DetectResult {
     var findings = options.extraFindings
-    findings.append(contentsOf: matchSignatures(text))
-    if let also = options.alsoScan, also != text {
-        var seen = Set(findings.compactMap { $0.patternId })
-        for f in matchSignatures(also) where !(f.patternId.map { seen.contains($0) } ?? false) {
-            findings.append(f)
+    var seen = Set(findings.compactMap { $0.patternId })
+
+    func merge(_ newFindings: [Finding], note: String? = nil) {
+        for f in newFindings {
+            if let pid = f.patternId, seen.contains(pid) { continue }
             if let pid = f.patternId { seen.insert(pid) }
+            if let note = note {
+                findings.append(Finding(stage: f.stage, category: f.category, severity: f.severity,
+                                        weight: f.weight, message: "\(f.message) \(note)",
+                                        excerpt: f.excerpt, patternId: f.patternId))
+            } else {
+                findings.append(f)
+            }
         }
+    }
+
+    merge(matchSignatures(text))
+    if let also = options.alsoScan, also != text { merge(matchSignatures(also)) }
+    if options.decodeBase64 {
+        for payload in decodeBase64Payloads(text) { merge(matchSignatures(payload), note: "(decoded from Base64)") }
     }
     if options.useHeuristics { findings.append(contentsOf: heuristicFindings(text)) }
 

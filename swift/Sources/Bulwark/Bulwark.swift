@@ -13,6 +13,7 @@ public struct BulwarkConfig: Sendable {
     // detect
     public var detectionThreshold: Double
     public var useHeuristics: Bool
+    public var decodeBase64: Bool         // decode embedded Base64 blobs and scan them too
     public var blockBeforeLlm: Severity?  // nil = never hard-block pre-LLM
     // spotlight
     public var spotlightMethods: [String]
@@ -34,6 +35,7 @@ public struct BulwarkConfig: Sendable {
         maxContentChars: Int = 200_000,
         detectionThreshold: Double = 0.5,
         useHeuristics: Bool = true,
+        decodeBase64: Bool = true,
         blockBeforeLlm: Severity? = nil,
         spotlightMethods: [String] = ["delimit"],
         marker: String = defaultMarker,
@@ -51,6 +53,7 @@ public struct BulwarkConfig: Sendable {
         self.maxContentChars = maxContentChars
         self.detectionThreshold = detectionThreshold
         self.useHeuristics = useHeuristics
+        self.decodeBase64 = decodeBase64
         self.blockBeforeLlm = blockBeforeLlm
         self.spotlightMethods = spotlightMethods
         self.marker = marker
@@ -113,11 +116,12 @@ public struct Bulwark {
         return result
     }
 
-    /// Confusable-folded copy for the detector's second pass (homoglyph
-    /// disguises). Detection runs primarily on the un-folded text so legitimate
-    /// non-Latin scripts and multilingual signatures keep working.
+    /// De-obfuscated copy for the detector's second pass (spaced-out letters,
+    /// homoglyph and leetspeak disguises). Detection runs primarily on the
+    /// un-folded text so legitimate non-Latin scripts and multilingual signatures
+    /// keep working.
     private func foldedText(_ san: SanitizeResult) -> String? {
-        config.foldConfusables ? foldConfusables(san.text) : nil
+        config.foldConfusables ? foldForDetection(san.text) : nil
     }
 
     /// Sanitize + detect only — no model call. Use to gate content yourself.
@@ -125,7 +129,7 @@ public struct Bulwark {
         let san = sanitize(content)
         return detect(san.text, options: DetectOptions(
             threshold: config.detectionThreshold, extraFindings: san.findings,
-            useHeuristics: config.useHeuristics, alsoScan: foldedText(san)
+            useHeuristics: config.useHeuristics, alsoScan: foldedText(san), decodeBase64: config.decodeBase64
         ))
     }
 
@@ -134,7 +138,7 @@ public struct Bulwark {
         let san = sanitize(content)
         let det = detect(san.text, options: DetectOptions(
             threshold: config.detectionThreshold, extraFindings: san.findings,
-            useHeuristics: config.useHeuristics, alsoScan: foldedText(san)
+            useHeuristics: config.useHeuristics, alsoScan: foldedText(san), decodeBase64: config.decodeBase64
         ))
         let spot = spotlight(san.text, options: SpotlightOptions(methods: config.spotlightMethods, marker: config.marker))
         let (messages, context) = buildMessages(spot, options: BuildOptions(
@@ -192,10 +196,12 @@ public struct Bulwark {
 }
 
 /// Sanitize then detect injection in `text` — convenience, no model call.
-/// Detection runs on a confusable-folded copy so homoglyph disguises are caught.
+/// Detection runs on a de-obfuscated copy (spaced-out letters joined, homoglyphs
+/// and leetspeak folded) and decodes embedded Base64 payloads, so the common
+/// keyword-evasion tricks are caught.
 public func scan(_ text: String, threshold: Double = 0.5) -> DetectResult {
     let s = sanitize(text)
-    return detect(s.text, options: DetectOptions(threshold: threshold, extraFindings: s.findings, alsoScan: foldConfusables(s.text)))
+    return detect(s.text, options: DetectOptions(threshold: threshold, extraFindings: s.findings, alsoScan: foldForDetection(s.text)))
 }
 
-public let bulwarkVersion = "0.3.0"
+public let bulwarkVersion = "0.4.0"

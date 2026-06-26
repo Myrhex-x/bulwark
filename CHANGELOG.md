@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 
+
+Evasion-resistant detection. All three languages stay at parity (70 Python /
+68 TypeScript / 67 Swift tests), produce identical verdicts, and run in CI.
+
+### Added
+- **Leetspeak folding** (`fold_leet`) — digit/symbol letter substitutions
+  (`1gn0re`, `pr0mpt`, `reve4l`, `$ystem`) are folded back to letters on the
+  detection copy, so the trigger word is matched. Only runs inside word-like
+  tokens, so standalone numbers, prices, and versions are left alone.
+- **Spaced-letter collapse** (`collapse_spaced_letters`) — a trigger word smeared
+  across single characters (`i g n o r e`, `i.g.n.o.r.e`, `d-i-s-r-e-g-a-r-d`) is
+  rejoined for detection. Word boundaries are preserved and short acronyms
+  (`U.S.A`) are left intact.
+- **Base64 payload decoding** (`decode_base64_payloads`) — embedded Base64 blobs
+  that decode to printable text are scanned with the full signature set, so an
+  instruction smuggled as `<base64>` is caught. Blobs that decode to binary
+  (keys, hashes) are skipped, so they don't create noise. Toggle with the new
+  `decode_base64` config flag.
+- A dedicated keyword-evasion test corpus in each language.
+
+### Changed
+- The detector's second pass now runs on a fully de-obfuscated copy
+  (`fold_for_detection`: spaced-out letters joined, then homoglyphs and leetspeak
+  folded), superseding the confusable-only fold. The model-facing text is still
+  never modified — every transform is detection-only.
+
+### Fixed
+- Corrected the stale `bulwark-ai` package name in the TypeScript entry-point
+  docstring to `bulwark-guard`.
+
 ## [0.3.0] — 
 
 Second security review. All three languages at parity (59 Python / 58 TypeScript

@@ -9,6 +9,48 @@ import { SIGNATURES } from "./patterns.js";
 import type { DetectResult, Finding, Severity } from "./types.js";
 import { severityGte } from "./types.js";
 
+const B64_PAYLOAD_RE = /[A-Za-z0-9+/]{24,}={0,2}/g;
+
+/** Decode `blob` (assumed valid Base64) to a UTF-8 string, or null. Isomorphic:
+ * uses Node's Buffer when present, otherwise atob + TextDecoder in the browser. */
+function decodeBase64(blob: string): string | null {
+  try {
+    if (typeof Buffer !== "undefined") {
+      const buf = Buffer.from(blob, "base64");
+      // Buffer.from is lenient; round-trip to reject non-Base64 input.
+      if (buf.toString("base64").replace(/=+$/, "") !== blob.replace(/=+$/, "")) return null;
+      return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    }
+    // eslint-disable-next-line no-undef
+    const bin = atob(blob);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/** Return the decoded text of embedded Base64 blobs that resolve to printable
+ * UTF-8. A common evasion is to Base64-encode an instruction so it sails past
+ * every keyword signature; decoding it here lets the same signatures run on the
+ * real payload. Blobs that aren't valid Base64 or decode to mostly binary are
+ * skipped, so random tokens and hashes don't generate noise. */
+export function decodeBase64Payloads(text: string, maxPayloads = 12): string[] {
+  const payloads: string[] = [];
+  for (const m of text.matchAll(B64_PAYLOAD_RE)) {
+    let blob = m[0];
+    blob = blob.slice(0, blob.length - (blob.length % 4));
+    if (blob.length < 24) continue;
+    const decoded = decodeBase64(blob);
+    if (decoded === null || decoded.trim().length < 4) continue;
+    const printable = [...decoded].filter((c) => c >= " " || c === "\t" || c === "\n" || c === "\r").length;
+    if (printable / decoded.length < 0.85) continue;
+    payloads.push(decoded);
+    if (payloads.length >= maxPayloads) break;
+  }
+  return payloads;
+}
+
 const IMPERATIVE_VERBS = new Set([
   "ignore", "disregard", "forget", "stop", "do", "don't", "dont", "never", "always",
   "print", "output", "repeat", "reveal", "send", "post", "fetch", "execute", "run",
@@ -97,22 +139,30 @@ export interface DetectOptions {
   extraFindings?: Finding[];
   useHeuristics?: boolean;
   /** Additional copy of the text scanned with the same signatures, results
-   * merged (used for the confusable-folded copy so homoglyph disguises are
+   * merged (used for the de-obfuscated copy so homoglyph/leetspeak disguises are
    * caught without breaking detection of legitimate non-Latin scripts). */
   alsoScan?: string;
+  /** Decode embedded Base64 blobs and scan the decoded payload too. */
+  decodeBase64?: boolean;
 }
 
 export function detect(text: string, opts: DetectOptions = {}): DetectResult {
-  const { threshold = 0.5, extraFindings = [], useHeuristics = true, alsoScan } = opts;
-  const findings: Finding[] = [...extraFindings, ...matchSignatures(text)];
-  if (alsoScan !== undefined && alsoScan !== text) {
-    const seen = new Set(findings.map((f) => f.patternId).filter(Boolean));
-    for (const f of matchSignatures(alsoScan)) {
-      if (!seen.has(f.patternId)) {
-        findings.push(f);
-        seen.add(f.patternId);
-      }
+  const { threshold = 0.5, extraFindings = [], useHeuristics = true, alsoScan, decodeBase64 = true } = opts;
+  const findings: Finding[] = [...extraFindings];
+  const seen = new Set(findings.map((f) => f.patternId).filter(Boolean));
+
+  const merge = (newFindings: Finding[], note?: string) => {
+    for (const f of newFindings) {
+      if (f.patternId && seen.has(f.patternId)) continue;
+      if (f.patternId) seen.add(f.patternId);
+      findings.push(note ? { ...f, message: `${f.message} ${note}` } : f);
     }
+  };
+
+  merge(matchSignatures(text));
+  if (alsoScan !== undefined && alsoScan !== text) merge(matchSignatures(alsoScan));
+  if (decodeBase64) {
+    for (const payload of decodeBase64Payloads(text)) merge(matchSignatures(payload), "(decoded from Base64)");
   }
   if (useHeuristics) findings.push(...heuristicFindings(text));
 

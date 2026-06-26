@@ -69,6 +69,47 @@ def fold_confusables(text: str) -> str:
     return text.translate(_CONFUSABLE_TABLE)
 
 
+# Leetspeak: digits/symbols standing in for letters (1gn0re, pr0mpt, reve4l,
+# $ystem). Folded on the detection copy only. To avoid mangling real numbers we
+# only rewrite a run that already contains a letter, so "2024" or "$5" are left
+# alone while "h4x0r" becomes "haxor".
+_LEET_TABLE = {ord(k): v for k, v in {
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s",
+}.items()}
+_LEET_TOKEN_RE = re.compile(r"[0-9@$]*[A-Za-z][0-9A-Za-z@$]*")
+
+# A trigger word smeared across single characters: "i g n o r e", "i.g.n.o.r.e",
+# "d-i-s-r-e-g-a-r-d". We collapse a run of single alphanumerics joined by one
+# separator each (≥4 of them) so the underlying word can be matched.
+_SPACED_RE = re.compile(r"\b(?:[0-9A-Za-z][ \t._\-*]){3,}[0-9A-Za-z]\b")
+_SEP_RE = re.compile(r"[ \t._\-*]")
+
+
+def fold_leet(text: str) -> str:
+    """Fold common leetspeak substitutions to letters within word-like tokens.
+    Detection-only; never shown to the model."""
+    return _LEET_TOKEN_RE.sub(lambda m: m.group(0).translate(_LEET_TABLE), text)
+
+
+def collapse_spaced_letters(text: str) -> str:
+    """Join trigger words that were split into single, separator-spaced characters.
+    Detection-only; never shown to the model."""
+    return _SPACED_RE.sub(lambda m: _SEP_RE.sub("", m.group(0)), text)
+
+
+def fold_for_detection(text: str) -> str:
+    """Build the de-obfuscated copy the detector scans alongside the original.
+
+    Composes the three transforms an attacker reaches for to slip a trigger word
+    past a keyword filter — spaced-out letters, cross-script homoglyphs, and
+    leetspeak — applied in that order so e.g. ``1 g n 0 r e`` collapses, folds,
+    and resolves to ``ignore``. The model never sees this text; it exists only so
+    detection sees through the disguise while the original copy keeps legitimate
+    non-Latin scripts and numbers intact.
+    """
+    return fold_leet(fold_confusables(collapse_spaced_letters(text)))
+
+
 def _is_hidden(attrs: List[Tuple[str, Optional[str]]]) -> bool:
     for name, value in attrs:
         lname = name.lower()

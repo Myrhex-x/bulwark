@@ -6,7 +6,7 @@
 import { bucket, detect, scoreFindings } from "./detect.js";
 import { buildMessages } from "./prompt.js";
 import { DEFAULT_MARKER, spotlight } from "./spotlight.js";
-import { foldConfusables, sanitize } from "./sanitize.js";
+import { foldForDetection, sanitize } from "./sanitize.js";
 import { validateOutput } from "./validate.js";
 import {
   formatReport,
@@ -34,6 +34,8 @@ export interface BulwarkConfig {
   // detect
   detectionThreshold: number;
   useHeuristics: boolean;
+  /** Decode embedded Base64 blobs and scan the decoded payload too. */
+  decodeBase64: boolean;
   /** Refuse to call the model when risk reaches this severity (null = never). */
   blockBeforeLlm: Severity | null;
   // spotlight
@@ -58,6 +60,7 @@ export function balancedConfig(): BulwarkConfig {
     maxContentChars: 200_000,
     detectionThreshold: 0.5,
     useHeuristics: true,
+    decodeBase64: true,
     blockBeforeLlm: null,
     spotlightMethods: ["delimit"],
     marker: DEFAULT_MARKER,
@@ -116,11 +119,11 @@ export class Bulwark {
     return result;
   }
 
-  /** Confusable-folded copy for the detector's second pass (homoglyph
-   * disguises). Detection runs primarily on the un-folded text so legitimate
-   * non-Latin scripts and multilingual signatures keep working. */
+  /** De-obfuscated copy for the detector's second pass (spaced-out letters,
+   * homoglyph and leetspeak disguises). Detection runs primarily on the un-folded
+   * text so legitimate non-Latin scripts and multilingual signatures keep working. */
   private foldedText(san: SanitizeResult): string | undefined {
-    return this.config.foldConfusables ? foldConfusables(san.text) : undefined;
+    return this.config.foldConfusables ? foldForDetection(san.text) : undefined;
   }
 
   /** Sanitize + detect only — no model call. Use to gate content yourself. */
@@ -131,6 +134,7 @@ export class Bulwark {
       extraFindings: san.findings,
       useHeuristics: this.config.useHeuristics,
       alsoScan: this.foldedText(san),
+      decodeBase64: this.config.decodeBase64,
     });
   }
 
@@ -142,6 +146,7 @@ export class Bulwark {
       extraFindings: san.findings,
       useHeuristics: this.config.useHeuristics,
       alsoScan: this.foldedText(san),
+      decodeBase64: this.config.decodeBase64,
     });
     const spot = spotlight(san.text, { methods: this.config.spotlightMethods, marker: this.config.marker });
     const { messages, context } = buildMessages(spot, {

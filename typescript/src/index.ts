@@ -1,7 +1,7 @@
 /**
  * Bulwark — an open-source safeguard against prompt injection in AI summarization.
  *
- *   import { Bulwark } from "bulwark-ai";
+ *   import { Bulwark } from "bulwark-guard";
  *
  *   const guard = new Bulwark();
  *   const result = await guard.summarize(untrustedWebPage, myModel); // myModel(messages) => string
@@ -10,15 +10,15 @@
  *
  * Just want detection, no model?
  *
- *   import { scan } from "bulwark-ai";
+ *   import { scan } from "bulwark-guard";
  *   if (scan(text).injected) { ... }
  */
 
 import { detect } from "./detect.js";
-import { foldConfusables, sanitize } from "./sanitize.js";
+import { foldForDetection, sanitize } from "./sanitize.js";
 import type { DetectResult } from "./types.js";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 export {
   Bulwark,
@@ -29,8 +29,18 @@ export {
   type PreparedRequest,
 } from "./guard.js";
 
-export { sanitize, stripInvisible, stripHtml, normalize, looksLikeHtml, foldConfusables } from "./sanitize.js";
-export { detect, matchSignatures, heuristicFindings, scoreFindings, bucket } from "./detect.js";
+export {
+  sanitize,
+  stripInvisible,
+  stripHtml,
+  normalize,
+  looksLikeHtml,
+  foldConfusables,
+  foldLeet,
+  collapseSpacedLetters,
+  foldForDetection,
+} from "./sanitize.js";
+export { detect, matchSignatures, heuristicFindings, scoreFindings, bucket, decodeBase64Payloads } from "./detect.js";
 export { spotlight, delimit, datamark, encodeBase64, makeNonce, DEFAULT_MARKER } from "./spotlight.js";
 export { buildMessages, makeCanary } from "./prompt.js";
 export { validateOutput } from "./validate.js";
@@ -38,8 +48,10 @@ export { SIGNATURES, type Signature } from "./patterns.js";
 export * from "./types.js";
 
 /** Sanitize then detect injection in `text` — convenience wrapper, no model call.
- * Detection runs on a confusable-folded copy so homoglyph disguises are caught. */
+ * Detection runs on a de-obfuscated copy (spaced-out letters joined, homoglyphs
+ * and leetspeak folded) and decodes embedded Base64 payloads, so the common
+ * keyword-evasion tricks are caught. */
 export function scan(text: string, threshold = 0.5): DetectResult {
   const s = sanitize(text);
-  return detect(s.text, { threshold, extraFindings: s.findings, alsoScan: foldConfusables(s.text) });
+  return detect(s.text, { threshold, extraFindings: s.findings, alsoScan: foldForDetection(s.text) });
 }

@@ -8,11 +8,16 @@ findings are folded into the same score.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
+from dataclasses import replace
 from typing import Iterable, List, Sequence
 
 from .patterns import SIGNATURES
 from .types import DetectResult, Finding, Severity, Stage
+
+_B64_PAYLOAD_RE = re.compile(r"[A-Za-z0-9+/]{24,}={0,2}")
 
 _IMPERATIVE_VERBS = {
     "ignore", "disregard", "forget", "stop", "do", "don't", "dont", "never", "always",
@@ -84,6 +89,41 @@ def heuristic_findings(text: str) -> List[Finding]:
     return findings
 
 
+def decode_base64_payloads(text: str, *, max_payloads: int = 12) -> List[str]:
+    """Return the decoded text of any embedded Base64 blobs that resolve to
+    printable UTF-8.
+
+    A common evasion is to Base64-encode an instruction and ask the model to
+    decode and follow it; the encoded blob sails past every keyword signature.
+    Decoding the blob here lets the same signatures run on the real payload.
+    Blobs that aren't valid Base64, don't decode to text, or decode to mostly
+    binary are skipped, so random tokens and hashes don't generate noise.
+    """
+    payloads: List[str] = []
+    for m in _B64_PAYLOAD_RE.finditer(text):
+        blob = m.group(0)
+        usable = len(blob) - (len(blob) % 4)
+        if usable < 24:
+            continue
+        try:
+            raw = base64.b64decode(blob[:usable], validate=True)
+        except (binascii.Error, ValueError):
+            continue
+        try:
+            decoded = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if len(decoded.strip()) < 4:
+            continue
+        printable = sum(1 for c in decoded if c.isprintable() or c in "\t\n\r")
+        if printable / len(decoded) < 0.85:
+            continue
+        payloads.append(decoded)
+        if len(payloads) >= max_payloads:
+            break
+    return payloads
+
+
 def score_findings(findings: Iterable[Finding]) -> float:
     """Combine finding weights with a noisy-OR into a [0, 1] risk score."""
     product = 1.0
@@ -112,23 +152,36 @@ def scan(
     extra_findings: Sequence[Finding] = (),
     use_heuristics: bool = True,
     also_scan: "str | None" = None,
+    decode_base64: bool = True,
 ) -> DetectResult:
     """Detect injection signals in ``text`` and produce a :class:`DetectResult`.
 
     ``extra_findings`` (e.g. from sanitization) are included in the score so the
     result reflects every signal Bulwark has seen. ``also_scan`` is an additional
     copy of the text run through the same signatures with results merged (used to
-    scan the confusable-folded text so homoglyph disguises are caught *without*
-    breaking detection of legitimate non-Latin scripts on the primary text).
+    scan the de-obfuscated text so homoglyph/leetspeak disguises are caught
+    *without* breaking detection of legitimate non-Latin scripts on the primary
+    text). When ``decode_base64`` is set, embedded Base64 blobs are decoded and
+    scanned too, so an instruction smuggled as an encoded blob is still caught.
+    Across all passes a signature contributes at most once.
     """
     findings: List[Finding] = list(extra_findings)
-    findings.extend(match_signatures(text))
-    if also_scan is not None and also_scan != text:
-        seen = {f.pattern_id for f in findings if f.pattern_id}
-        for f in match_signatures(also_scan):
-            if f.pattern_id not in seen:
-                findings.append(f)
+    seen = {f.pattern_id for f in findings if f.pattern_id}
+
+    def _merge(new_findings: Iterable[Finding], note: "str | None" = None) -> None:
+        for f in new_findings:
+            if f.pattern_id and f.pattern_id in seen:
+                continue
+            if f.pattern_id:
                 seen.add(f.pattern_id)
+            findings.append(replace(f, message=f"{f.message} {note}") if note else f)
+
+    _merge(match_signatures(text))
+    if also_scan is not None and also_scan != text:
+        _merge(match_signatures(also_scan))
+    if decode_base64:
+        for payload in decode_base64_payloads(text):
+            _merge(match_signatures(payload), note="(decoded from Base64)")
     if use_heuristics:
         findings.extend(heuristic_findings(text))
 

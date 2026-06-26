@@ -35,6 +35,54 @@ public func foldConfusables(_ text: String) -> String {
     String(text.map { confusables[$0] ?? $0 })
 }
 
+// Leetspeak: digits/symbols standing in for letters (1gn0re, pr0mpt, $ystem).
+// Folded on the detection copy only. We only rewrite a run that already contains
+// a letter, so "2024" or "$5" are left alone while "h4x0r" becomes "haxor".
+private let leetMap: [Character: Character] = ["0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"]
+private let leetTokenRegex = CompiledRegex(#"[0-9@$]*[A-Za-z][0-9A-Za-z@$]*"#, options: [])
+// A trigger word smeared across single, separator-spaced characters
+// ("i g n o r e", "i.g.n.o.r.e"). Anchored so it never swallows a letter from
+// the next word, and ≥4 chars long so short acronyms ("U.S.A") survive.
+private let spacedRegex = CompiledRegex(#"\b(?:[0-9A-Za-z][ \t._\-*]){3,}[0-9A-Za-z]\b"#, options: [])
+private let sepRegex = CompiledRegex(#"[ \t._\-*]"#, options: [])
+
+// Rebuild `text` replacing every match of `regex` with `transform(match)`.
+private func replaceMatches(_ text: String, _ regex: CompiledRegex, _ transform: (String) -> String) -> String {
+    let matches = regex.allMatches(text)
+    guard !matches.isEmpty else { return text }
+    let ns = text as NSString
+    var result = ""
+    var last = 0
+    for m in matches {
+        result += ns.substring(with: NSRange(location: last, length: m.range.location - last))
+        result += transform(ns.substring(with: m.range))
+        last = m.range.location + m.range.length
+    }
+    result += ns.substring(with: NSRange(location: last, length: ns.length - last))
+    return result
+}
+
+/// Fold common leetspeak substitutions to letters within word-like tokens.
+/// Detection-only; never shown to the model.
+public func foldLeet(_ text: String) -> String {
+    replaceMatches(text, leetTokenRegex) { tok in String(tok.map { leetMap[$0] ?? $0 }) }
+}
+
+/// Join trigger words split into single, separator-spaced characters.
+/// Detection-only; never shown to the model.
+public func collapseSpacedLetters(_ text: String) -> String {
+    replaceMatches(text, spacedRegex) { run in sepRegex.replaceAll(run, with: "") }
+}
+
+/// Build the de-obfuscated copy the detector scans alongside the original:
+/// spaced-out letters joined, then homoglyphs and leetspeak folded (in that
+/// order, so e.g. `1 g n 0 r e` resolves to `ignore`). The model never sees this;
+/// it lets detection see through the disguise while the original copy keeps
+/// legitimate non-Latin scripts and numbers intact.
+public func foldForDetection(_ text: String) -> String {
+    foldLeet(foldConfusables(collapseSpacedLetters(text)))
+}
+
 private let wsRegex = CompiledRegex(#"[^\S\n]+"#, options: [])
 private let blanklinesRegex = CompiledRegex(#"\n{3,}"#, options: [])
 private let htmlishRegex = CompiledRegex(#"<(?:/?[a-zA-Z][\w:-]*\b|!--)"#, options: [.caseInsensitive])
